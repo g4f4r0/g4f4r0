@@ -35,7 +35,7 @@ export interface Models {
 export interface CapyApi {
   send(text: string, clientKey: string, delivery?: 'interrupt' | 'queue', model?: ModelSelection): Promise<string>;
   readModels(): Promise<Models>;
-  readReplies(afterId: string, windowMs: number): Promise<ReplyWindow>;
+  readReplies(afterId: string, windowMs: number, wake?: AbortSignal): Promise<ReplyWindow>;
 }
 
 const BATCH_MS = 150;
@@ -94,9 +94,10 @@ export function createCapy(apiKey: string, cfg: Config, fetcher: typeof fetch = 
       };
     },
 
-    readReplies: async (afterId, windowMs) => {
+    readReplies: async (afterId, windowMs, wake) => {
       const result: ReplyWindow = { items: [], live: [], cursor: afterId, status: null, worked: false, toolStarted: false };
       const abort = new AbortController();
+      wake?.addEventListener('abort', () => abort.abort());
       let timer = setTimeout(() => abort.abort(), windowMs);
       const soon = () => {
         clearTimeout(timer);

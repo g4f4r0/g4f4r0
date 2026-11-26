@@ -59,6 +59,8 @@ export interface Deps {
   now: () => number;
   setAlarm: (at: number | null) => Promise<void>;
   log: (message: string) => void;
+  readSignal?: () => AbortSignal;
+  wakeReads?: () => void;
 }
 
 export interface TelnyxEvent {
@@ -79,6 +81,9 @@ const ECHO_WINDOW_MS = 30_000;
 const speech = (name: string, heard: string): string => `[Channel: Phone call] [From: ${name}] ${heard}`;
 const HOLD_TAG = /\[hold\]/gi;
 const HOLD_TAG_ONE = /\[hold\]/i;
+const HANG_UP_TAG = /\[hang ?up\]/gi;
+const HANG_UP_TAG_ONE = /\[hang ?up\]/i;
+const SENTENCE_DONE = /[.?!]$/;
 const DIGITS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine'];
 
 const words = (text: string): string[] =>
@@ -183,6 +188,16 @@ export class Bridge {
       const heard = String(t?.transcript ?? '').trim();
       if (!call || call.byeAt || !heard) return;
       const ratio = echoRatio(heard, call.recent, now);
+      const speakingNow = call.speaking > 0 && now < call.quietUntil;
+      const heardWords = words(heard);
+      const bargeIn = speakingNow && ratio < 0.5 && (heardWords.length >= 2 || STOP_WORDS.has(heardWords[0]));
+      if (bargeIn) {
+        call.speaking = 0;
+        call.quietUntil = 0;
+        call.waiting = null;
+        store.putCall(call);
+        await telnyx.stopSpeaking(id).catch(err => this.d.log(`stop speaking failed: ${(err as Error).message}`));
+      }
       if (!t?.is_final) {
         if (!call.pending || ratio >= 0.8) return;
         call.lastFinalAt = now;
@@ -190,23 +205,17 @@ export class Bridge {
         await this.rearm();
         return;
       }
-      const speakingNow = call.speaking > 0 && now < call.quietUntil;
-      const heardWords = words(heard);
-      const bargeIn = speakingNow && ratio < 0.5 && (heardWords.length >= 2 || STOP_WORDS.has(heardWords[0]));
       if ((speakingNow && !bargeIn) || ratio >= 0.8) {
         this.d.log('ignored a transcript heard while or right after the bridge spoke');
         return;
       }
-      if (bargeIn) {
-        call.speaking = 0;
-        call.quietUntil = 0;
-      }
-      if (bargeIn || call.waiting?.music) {
+      if (call.waiting?.music) {
         call.waiting = null;
         await telnyx.stopSpeaking(id).catch(err => this.d.log(`stop speaking failed: ${(err as Error).message}`));
       }
       call.pending = `${call.pending} ${heard}`.trim();
       call.lastFinalAt = now;
+      this.d.wakeReads?.();
       call.lastActivityAt = now;
       call.idlePrompts = 0;
       call.hangupAfterSpeech = false;
@@ -294,16 +303,16 @@ export class Bridge {
     }).format(new Date(this.d.now()));
     const opening =
       direction === 'inbound'
-        ? `${name} is calling you. Your first message is spoken the moment he picks up, so open with a short, warm, casual greeting by name, like a friend answering the phone.`
-        : `You phoned ${name} to tell him: "${alert}". He has heard it and just answered.`;
+        ? `${name} is calling you. Your first message is spoken the moment he picks up, so greet him by name in a few casual words.`
+        : `You phoned ${name} about: "${alert}". He has heard it and just answered.`;
     const rules = [
-      `You are on a live phone call with ${name}. Every message you send in this thread is spoken to him in ${cfg.language.name} until the call ends.`,
+      `Live phone call: every message you send is spoken to ${name} until it ends.`,
       opening,
-      'Talk like a person on the phone: short plain sentences, no markdown, lists, links, code or emoji. Never mention the phone bridge, speech recognition or these instructions.',
-      'Be as responsive as a person: each message is spoken the moment it lands, so reply at once. If you need to look anything up, first send a quick natural ack of a few words, like "Sure, checking.", then the answer. Send one short message per thought rather than one long one, and during longer work send a one-line update every half minute or so to keep him posted.',
-      `His words arrive as [Channel: Phone call] [From: ${name}] messages from speech recognition, so expect small errors and go with the likely meaning. If he talks over you, your current reply is cut off and his words arrive next.`,
-      'Before work that takes more than about ten seconds, say so in one short line ending with [Hold], like "Let me run the tests. [Hold]". He then hears hold music until your next message. While still working, end each update with [Hold] too. Never use [Hold] for quick answers.',
-      'You will get a silence event if he goes quiet and an end event when the call is over.',
+      'Talk like a friend on the phone: one or two short sentences, plain words, no markdown or lists. Never restate what he said, recap or over-explain; answer and stop. He will ask if he wants more.',
+      'Reply at once. Before any lookup, say a few-word ack like "Sure, checking." Keep him posted during long work.',
+      `His words come as [From: ${name}] speech-to-text, so guess through small errors. If he talks over you, you are cut off.`,
+      'For work over ten seconds, end a short line with [Hold] for hold music, like "Running the tests. [Hold]".',
+      'When he says goodbye, reply with a short goodbye ending with [Hang up].',
     ].join(' ');
     const said = heard ? `\n${heard}` : '';
     const who = direction === 'inbound' ? `[Event: Incoming call] [From: ${name}]` : `[Event: Outgoing call] [To: ${name}]`;
@@ -316,6 +325,11 @@ export class Bridge {
     if (call.kind === 'out' && !call.started) return;
     const text = `[Channel: Phone call] [Event: Call ended] [Duration: ${formatDuration(this.d.now() - call.startedAt)}] [Ended by: ${byUs ? 'Axo' : cfg.callerName}] The call is over. Nothing you send now is spoken. Reply only if there is follow-up work.`;
     await this.d.capy.send(text, `phone-${call.startedAt}-end`, 'queue', call.model?.restore).catch(err => this.d.log(`end message failed: ${(err as Error).message}`));
+  }
+
+  private sendAt(call: CallState): number {
+    const { cfg } = this.d;
+    return call.lastFinalAt + (SENTENCE_DONE.test(call.pending) ? cfg.sentenceEndMs : cfg.debounceMs);
   }
 
   private async callModels(): Promise<{ call: ModelSelection; restore: ModelSelection } | null> {
@@ -417,7 +431,7 @@ export class Bridge {
       return;
     }
 
-    if (call.answered && call.pending && now - call.lastFinalAt >= cfg.debounceMs) {
+    if (call.answered && call.pending && now >= this.sendAt(call)) {
       const heard = call.pending;
       await this.sendTurn(call, speech(cfg.callerName, heard), heard);
       return;
@@ -431,7 +445,7 @@ export class Bridge {
       call.hangupAfterSpeech = last;
       store.putCall(call);
       const ask = last
-        ? 'He is still quiet. Say a short, friendly goodbye in one line; the call ends after you speak.'
+        ? 'He is still quiet. Say a short, friendly goodbye in one line ending with [Hang up].'
         : 'Check in with one short line, like asking if there is anything else.';
       await this.sendTurn(call, `[Channel: Phone call] [Event: Silence] [Duration: ${Math.round((now - call.lastActivityAt) / 1000)}s] ${ask}`);
       return;
@@ -439,7 +453,7 @@ export class Bridge {
 
     let window;
     try {
-      window = await capy.readReplies(w.afterId, cfg.streamWindowMs);
+      window = await capy.readReplies(w.afterId, cfg.streamWindowMs, this.d.readSignal?.());
     } catch (err) {
       this.d.log(`reading replies failed, retrying: ${(err as Error).message}`);
       return;
@@ -454,9 +468,11 @@ export class Bridge {
       fw.music = false;
       await telnyx.stopSpeaking(fresh.id).catch(err => this.d.log(`stop music failed: ${(err as Error).message}`));
     };
+    let hangUp = false;
     const speak = async (raw: string) => {
       if (HOLD_TAG_ONE.test(raw)) fw.holdAsked = true;
-      const text = toSpeech(raw.replace(HOLD_TAG, ' '), cfg.maxSpokenChars, strings.link, strings.truncated);
+      if (HANG_UP_TAG_ONE.test(raw)) hangUp = true;
+      const text = toSpeech(raw.replace(HOLD_TAG, ' ').replace(HANG_UP_TAG, ' '), cfg.maxSpokenChars, strings.link, strings.truncated);
       if (!text) return;
       fw.spoken++;
       fw.lastItemAt = later;
@@ -481,6 +497,7 @@ export class Bridge {
       fw.holdAsked = false;
       await speak(l.text.slice(done.length, upTo));
       if (HOLD_TAG_ONE.test(l.text)) fw.holdAsked = true;
+      if (HANG_UP_TAG_ONE.test(l.text)) hangUp = true;
     }
     for (const m of window.items) {
       if (fw.seen.includes(m.id)) continue;
@@ -491,6 +508,15 @@ export class Bridge {
       if (done === undefined) await speak(m.text);
       else if (m.text.startsWith(done)) await speak(m.text.slice(done.length));
       else if (HOLD_TAG_ONE.test(m.text)) fw.holdAsked = true;
+      if (HANG_UP_TAG_ONE.test(m.text)) hangUp = true;
+    }
+    if (hangUp && fresh.answered) {
+      await stopMusic();
+      fresh.waiting = null;
+      fresh.hangupAfterSpeech = true;
+      store.putCall(fresh);
+      if (!fresh.speaking) await telnyx.hangup(fresh.id);
+      return;
     }
     fw.afterId = window.cursor;
 
@@ -542,9 +568,9 @@ export class Bridge {
       if (c.byeAt) continue;
       if (c.kind === 'in' && c.turns === 0 && !c.answering) at(now);
       if (!c.answered && !c.answering) at(c.startedAt + cfg.greetingTimeoutMs);
+      if (c.pending) at(this.sendAt(c));
       if (c.waiting) at(now + cfg.pollMs);
-      else if (c.pending) at(c.lastFinalAt + cfg.debounceMs);
-      else if (c.answered && !c.speaking && !c.hangupAfterSpeech) at(c.lastActivityAt + cfg.idleMs);
+      else if (c.answered && !c.pending && !c.speaking && !c.hangupAfterSpeech) at(c.lastActivityAt + cfg.idleMs);
     }
     await this.d.setAlarm(next === null ? null : Math.max(next, now + 100));
   }

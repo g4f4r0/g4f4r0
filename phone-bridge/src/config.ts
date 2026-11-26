@@ -76,6 +76,7 @@ export interface Config {
   sttModel: string;
   timezone: string;
   debounceMs: number;
+  sentenceEndMs: number;
   pollMs: number;
   streamWindowMs: number;
 }
@@ -117,7 +118,8 @@ export function parseConfig(env: Env): Config {
     sttEngine: TELNYX_STT_ENGINE,
     sttModel: TELNYX_STT_MODEL,
     timezone: TIMEZONE,
-    debounceMs: 1000,
+    debounceMs: 1200,
+    sentenceEndMs: 400,
     pollMs: 250,
     streamWindowMs: 3000,
   };

@@ -10,6 +10,7 @@ const MAX_ALERT_CHARS = 1000;
 
 export class PhoneBridge extends DurableObject<Env> {
   private sql = this.ctx.storage.sql;
+  private readWake = new AbortController();
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -52,6 +53,8 @@ export class PhoneBridge extends DurableObject<Env> {
       now: () => Date.now(),
       setAlarm: async at => (at === null ? this.ctx.storage.deleteAlarm() : this.ctx.storage.setAlarm(at)),
       log: m => console.log(m),
+      readSignal: () => (this.readWake = new AbortController()).signal,
+      wakeReads: () => this.readWake.abort(),
     });
   }
 
