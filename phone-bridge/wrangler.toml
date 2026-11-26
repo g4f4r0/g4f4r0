@@ -19,7 +19,7 @@ new_sqlite_classes = ["PhoneBridge"]
 
 [vars]
 CAPY_THREAD_ID = "jam_01M7ZVYPQRQXF852J7VSRKMTAQ"
-CAPY_CALL_MODEL_ID = "openai/gpt-6.2-sol"
+CAPY_CALL_MODEL_ID = "anthropic/claude-sonnet-5-5"
 CAPY_CALL_REASONING_MODE = "low"
 CAPY_CALL_FAST_MODE = "true"
 CAPY_DEFAULT_MODEL_ID = "anthropic/claude-sonnet-5-5"
