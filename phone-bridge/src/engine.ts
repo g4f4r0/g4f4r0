@@ -41,6 +41,7 @@ export interface CallState {
   idlePrompts: number;
   model: { call: ModelSelection; restore: ModelSelection } | null;
   modelChecked: boolean;
+  endOfTurn: boolean;
 }
 
 export interface Store extends CountStore {
@@ -146,13 +147,13 @@ export class Bridge {
         call.lastActivityAt = now;
         store.putCall(call);
         for (const line of greeting) await this.say(call, line);
-        await telnyx.startTranscription(id);
+        await this.listen(id);
       } else {
         const call = this.newCall(id, 'out', now, String(cs.text ?? ''));
         call.answered = true;
         if (cs.listen) {
           await this.say(call, `${cs.text} ${cfg.language.strings.replyListen}`);
-          await telnyx.startTranscription(id);
+          await this.listen(id);
         } else {
           store.putCall(call);
           await telnyx.speak(id, String(cs.text ?? ''), { end: true });
@@ -286,6 +287,7 @@ export class Bridge {
       idlePrompts: 0,
       model: null,
       modelChecked: false,
+      endOfTurn: false,
     };
   }
 
@@ -316,7 +318,7 @@ export class Bridge {
     ].join(' ');
     const said = heard ? `\n${heard}` : '';
     const who = direction === 'inbound' ? `[Event: Incoming call] [From: ${name}]` : `[Event: Outgoing call] [To: ${name}]`;
-    return `[Channel: Phone call] ${who} [Time: ${time} ${cfg.timezone}] ${rules}${said}`;
+    return `[Channel: Phone call] ${who} [Time: ${time} ${cfg.timezone}] [Rules: ${rules}]${said}`;
   }
 
   private async finish(call: CallState, byUs: boolean): Promise<void> {
@@ -329,11 +331,25 @@ export class Bridge {
 
   private sendAt(call: CallState): number {
     const { cfg } = this.d;
-    return call.lastFinalAt + (SENTENCE_DONE.test(call.pending) ? cfg.sentenceEndMs : cfg.debounceMs);
+    return call.lastFinalAt + (call.endOfTurn || SENTENCE_DONE.test(call.pending) ? cfg.sentenceEndMs : cfg.debounceMs);
+  }
+
+  private async listen(id: string): Promise<void> {
+    const model = await this.d.telnyx.startTranscription(id);
+    this.d.log(`listening with ${model}`);
+    const call = this.d.store.getCall(id);
+    if (!call) return;
+    call.endOfTurn = String(model).includes('flux');
+    this.d.store.putCall(call);
   }
 
   private async callModels(): Promise<{ call: ModelSelection; restore: ModelSelection } | null> {
     const { cfg, capy } = this.d;
+    if (cfg.axoModel && cfg.callModel && cfg.callReasoning && !cfg.callFast)
+      return {
+        call: { modelId: cfg.callModel, reasoningMode: cfg.callReasoning },
+        restore: { modelId: cfg.axoModel, reasoningMode: cfg.axoReasoning },
+      };
     try {
       const models = await capy.readModels();
       const axoModel = cfg.axoModel ?? models.current;

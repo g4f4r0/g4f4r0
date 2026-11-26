@@ -22,7 +22,7 @@ function setup(overrides: Partial<Env> = {}) {
   };
   const log: string[] = [];
   const sent: { text: string; key: string; delivery: string; model?: ModelSelection }[] = [];
-  const axo = { queue: [] as CapyMessage[], status: 'working', worked: true, sendFails: 0, readFails: 0, models: { current: 'anthropic/claude-sonnet-5-5' as string | null, fast: ['anthropic/claude-opus-5-5'] }, live: [] as { callId: string; text: string }[], tool: false };
+  const axo = { queue: [] as CapyMessage[], status: 'working', worked: true, sendFails: 0, readFails: 0, models: { current: 'anthropic/claude-sonnet-5-5' as string | null, fast: ['anthropic/claude-opus-5-5'] }, live: [] as { callId: string; text: string }[], tool: false, stt: 'deepgram/nova-3' };
   const clock = { now: Date.UTC(2026, 10, 26, 18, 0) };
   const env = { CALLER_PHONE_NUMBER: ALLOWED, TELNYX_PHONE_NUMBER: '+13072070207', TELNYX_CONNECTION_ID: 'c', CAPY_THREAD_ID: 'jam_x', ...overrides } as Env;
   const cfg = parseConfig(env);
@@ -39,7 +39,7 @@ function setup(overrides: Partial<Env> = {}) {
       speak: async (id, t, s) => void log.push(`speak ${id} ${t}${s ? ' ' + JSON.stringify(s) : ''}`),
       stopSpeaking: async id => void log.push(`stop ${id}`),
       playMusic: async (id, url) => void log.push(`music ${id} ${url}`),
-      startTranscription: async id => void log.push(`stt ${id}`),
+      startTranscription: async id => (log.push(`stt ${id}`), axo.stt),
       hangup: async id => void log.push(`hangup ${id}`),
       dial: async s => (log.push(`dial ${JSON.stringify(s)}`), 'out-1'),
     },
@@ -274,6 +274,17 @@ describe('inbound: conversation', () => {
     await s.hear('What is on today?');
     await s.tick(400);
     expect(s.sent.at(-1)?.text).toBe('[Channel: Phone call] [From: Johan] What is on today?');
+  });
+
+  it('trusts Flux end of turn and sends an unpunctuated turn quickly', async () => {
+    const f = setup();
+    f.axo.stt = 'deepgram/flux';
+    await f.pickUp();
+    await f.spoke();
+    f.working();
+    await f.hear('check my email');
+    await f.tick(400);
+    expect(f.sent.at(-1)?.text).toBe('[Channel: Phone call] [From: Johan] check my email');
   });
 
   it('hangs up after Axo says goodbye with [Hang up]', async () => {

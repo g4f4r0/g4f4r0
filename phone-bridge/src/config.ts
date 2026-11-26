@@ -6,7 +6,8 @@ export const HOLD_MUSIC_URL = 'https://g4f4r0-axo.hellogafaro.workers.dev/hold.m
 export const CAPY_API_BASE = 'https://api.capy.ai/api/v1';
 export const TELNYX_VOICE = 'Telnyx.Ultra.47c38ca4-5f35-497b-b1a3-415245fb35e1';
 export const TELNYX_STT_ENGINE = 'Deepgram';
-export const TELNYX_STT_MODEL = 'deepgram/nova-3';
+export const TELNYX_STT_MODEL = 'deepgram/flux';
+export const TELNYX_STT_FALLBACK_MODEL = 'deepgram/nova-3';
 export const TELNYX_STT_KEYTERMS = ['Axo', 'Capy', 'Johan', 'g4f4r0', 'Telnyx', 'Cloudflare', 'GitHub'];
 
 export const STRINGS = {
@@ -74,6 +75,7 @@ export interface Config {
   voice: string;
   sttEngine: string;
   sttModel: string;
+  sttFallbackModel: string;
   timezone: string;
   debounceMs: number;
   sentenceEndMs: number;
@@ -117,6 +119,7 @@ export function parseConfig(env: Env): Config {
     voice: TELNYX_VOICE,
     sttEngine: TELNYX_STT_ENGINE,
     sttModel: TELNYX_STT_MODEL,
+    sttFallbackModel: TELNYX_STT_FALLBACK_MODEL,
     timezone: TIMEZONE,
     debounceMs: 1200,
     sentenceEndMs: 400,

@@ -6,7 +6,7 @@ export interface TelnyxApi {
   speak(callControlId: string, text: string, clientState?: object): Promise<void>;
   stopSpeaking(callControlId: string): Promise<void>;
   playMusic(callControlId: string, url: string): Promise<void>;
-  startTranscription(callControlId: string): Promise<void>;
+  startTranscription(callControlId: string): Promise<string>;
   hangup(callControlId: string): Promise<void>;
   dial(clientState: object): Promise<string>;
 }
@@ -57,19 +57,22 @@ export function createTelnyx(apiKey: string, cfg: Config, fetcher: typeof fetch 
       }),
     stopSpeaking: id => action(id, 'playback_stop', { stop: 'all' }),
     playMusic: (id, url) => action(id, 'playback_start', { audio_url: url, loop: 'infinity' }),
-    startTranscription: id =>
-      action(id, 'transcription_start', {
-        transcription_engine: cfg.sttEngine,
-        transcription_engine_config: {
+    startTranscription: async id => {
+      const start = (model: string) =>
+        action(id, 'transcription_start', {
           transcription_engine: cfg.sttEngine,
-          transcription_model: cfg.sttModel,
-          language: cfg.language.stt,
-          utterance_end_ms: cfg.utteranceEndMs,
-          interim_results: true,
-          ...(cfg.keyterms.length ? { keyterms: cfg.keyterms } : {}),
-        },
-        transcription_tracks: 'inbound',
-      }),
+          transcription_engine_config: {
+            transcription_engine: cfg.sttEngine,
+            transcription_model: model,
+            language: cfg.language.stt,
+            ...(model.includes('flux') ? {} : { utterance_end_ms: cfg.utteranceEndMs }),
+            interim_results: true,
+            ...(cfg.keyterms.length ? { keyterms: cfg.keyterms } : {}),
+          },
+          transcription_tracks: 'inbound',
+        }).then(() => model);
+      return start(cfg.sttModel).catch(() => start(cfg.sttFallbackModel));
+    },
     hangup: id => action(id, 'hangup'),
     dial: async state => {
       const res = await post('/calls', {
