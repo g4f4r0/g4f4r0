@@ -4,6 +4,7 @@ export interface TelnyxApi {
   answer(callControlId: string, clientState: object): Promise<void>;
   reject(callControlId: string): Promise<void>;
   speak(callControlId: string, text: string, clientState?: object): Promise<void>;
+  stopSpeaking(callControlId: string): Promise<void>;
   startTranscription(callControlId: string): Promise<void>;
   hangup(callControlId: string): Promise<void>;
   dial(clientState: object): Promise<string>;
@@ -53,6 +54,7 @@ export function createTelnyx(apiKey: string, cfg: Config, fetcher: typeof fetch 
         service_level: 'premium',
         ...(state ? { client_state: encodeState(state) } : {}),
       }),
+    stopSpeaking: id => action(id, 'playback_stop', { stop: 'all' }),
     startTranscription: id =>
       action(id, 'transcription_start', {
         transcription_engine: cfg.sttEngine,
@@ -60,6 +62,8 @@ export function createTelnyx(apiKey: string, cfg: Config, fetcher: typeof fetch 
           transcription_engine: cfg.sttEngine,
           transcription_model: cfg.sttModel,
           language: cfg.language.stt,
+          utterance_end_ms: cfg.utteranceEndMs,
+          ...(cfg.keyterms.length ? { keyterms: cfg.keyterms } : {}),
         },
         transcription_tracks: 'inbound',
       }),

@@ -19,7 +19,13 @@ describe('telnyx transcription_start', () => {
     expect(requests[0].url).toBe('https://api.telnyx.com/v2/calls/v3%3Aabc/actions/transcription_start');
     expect(requests[0].body).toEqual({
       transcription_engine: 'Deepgram',
-      transcription_engine_config: { transcription_engine: 'Deepgram', transcription_model: 'deepgram/nova-3', language: 'en' },
+      transcription_engine_config: {
+        transcription_engine: 'Deepgram',
+        transcription_model: 'deepgram/nova-3',
+        language: 'en',
+        utterance_end_ms: 800,
+        keyterms: ['Axo', 'Capy', 'Johan', 'g4f4r0', 'Telnyx', 'Cloudflare', 'GitHub'],
+      },
       transcription_tracks: 'inbound',
     });
   });

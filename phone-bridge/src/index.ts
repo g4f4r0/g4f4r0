@@ -47,7 +47,7 @@ export class PhoneBridge extends DurableObject<Env> {
     return new Bridge({
       cfg,
       telnyx: createTelnyx(this.env.TELNYX_API_KEY, cfg),
-      capy: createCapy(this.env.CAPY_API_KEY, cfg, this.env.CAPY_DELIVERY ?? 'interrupt'),
+      capy: createCapy(this.env.CAPY_API_KEY, cfg),
       store: this.store(),
       now: () => Date.now(),
       setAlarm: async at => (at === null ? this.ctx.storage.deleteAlarm() : this.ctx.storage.setAlarm(at)),

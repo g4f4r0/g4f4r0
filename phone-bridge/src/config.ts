@@ -9,13 +9,16 @@ export interface Env {
   TELNYX_CONNECTION_ID: string;
   CAPY_THREAD_ID: string;
   CAPY_API_BASE?: string;
-  CAPY_DELIVERY?: string;
   LANGUAGE?: string;
   MAX_CALL_SECONDS?: string;
   MAX_OUTBOUND_PER_DAY?: string;
   HOLD_AFTER_SECONDS?: string;
   REPLY_TIMEOUT_SECONDS?: string;
   MAX_SPOKEN_CHARS?: string;
+  IDLE_SECONDS?: string;
+  GREETING_TIMEOUT_SECONDS?: string;
+  CALLER_NAME?: string;
+  KEYTERMS?: string;
   VOICE?: string;
   STT_ENGINE?: string;
   STT_MODEL?: string;
@@ -24,6 +27,7 @@ export interface Env {
 
 export interface Strings {
   greeting: string;
+  goodbye: string;
   hold: string;
   stillWorking: string;
   timeLimit: string;
@@ -49,8 +53,9 @@ export const LANGUAGES: Record<string, Language> = {
     voice: 'Telnyx.Ultra.47c38ca4-5f35-497b-b1a3-415245fb35e1',
     name: 'English',
     strings: {
-      greeting: 'Axo here. Go ahead.',
-      hold: 'One moment, I am asking Axo.',
+      greeting: 'Hey',
+      goodbye: 'Talk soon. Bye.',
+      hold: 'One moment.',
       stillWorking: 'Still working on it.',
       timeLimit: 'This call has reached its time limit. Goodbye.',
       replyTimeout: 'Axo has not answered yet. The answer will be in the thread. Goodbye.',
@@ -66,8 +71,9 @@ export const LANGUAGES: Record<string, Language> = {
     voice: 'AWS.Polly.Lucia-Neural',
     name: 'Spanish',
     strings: {
-      greeting: 'Habla Axo. Dime.',
-      hold: 'Un momento, se lo pregunto a Axo.',
+      greeting: 'Hola',
+      goodbye: 'Hablamos. Adiós.',
+      hold: 'Un momento.',
       stillWorking: 'Sigo trabajando en ello.',
       timeLimit: 'La llamada ha alcanzado su límite de tiempo. Adiós.',
       replyTimeout: 'Axo aún no ha respondido. La respuesta estará en el hilo. Adiós.',
@@ -91,12 +97,18 @@ export interface Config {
   holdAfterMs: number;
   replyTimeoutMs: number;
   maxSpokenChars: number;
+  idleMs: number;
+  greetingTimeoutMs: number;
+  callerName: string;
+  keyterms: string[];
+  utteranceEndMs: number;
   voice: string;
   sttEngine: string;
   sttModel: string;
   timezone: string;
   debounceMs: number;
   pollMs: number;
+  streamWindowMs: number;
 }
 
 const int = (raw: string | undefined, fallback: number, name: string): number => {
@@ -118,14 +130,23 @@ export function parseConfig(env: Env): Config {
     language,
     maxCallMs: int(env.MAX_CALL_SECONDS, 600, 'MAX_CALL_SECONDS') * 1000,
     maxOutboundPerDay: int(env.MAX_OUTBOUND_PER_DAY, 10, 'MAX_OUTBOUND_PER_DAY'),
-    holdAfterMs: int(env.HOLD_AFTER_SECONDS, 8, 'HOLD_AFTER_SECONDS') * 1000,
+    holdAfterMs: int(env.HOLD_AFTER_SECONDS, 6, 'HOLD_AFTER_SECONDS') * 1000,
     replyTimeoutMs: int(env.REPLY_TIMEOUT_SECONDS, 180, 'REPLY_TIMEOUT_SECONDS') * 1000,
     maxSpokenChars: int(env.MAX_SPOKEN_CHARS, 700, 'MAX_SPOKEN_CHARS'),
+    idleMs: int(env.IDLE_SECONDS, 20, 'IDLE_SECONDS') * 1000,
+    greetingTimeoutMs: int(env.GREETING_TIMEOUT_SECONDS, 8, 'GREETING_TIMEOUT_SECONDS') * 1000,
+    callerName: env.CALLER_NAME ?? 'Johan',
+    keyterms: (env.KEYTERMS ?? 'Axo,Capy,Johan,g4f4r0,Telnyx,Cloudflare,GitHub')
+      .split(',')
+      .map(s => s.trim())
+      .filter(Boolean),
+    utteranceEndMs: 800,
     voice: env.VOICE ?? language.voice,
     sttEngine: env.STT_ENGINE ?? 'Deepgram',
     sttModel: env.STT_MODEL ?? 'deepgram/nova-3',
     timezone: env.TIMEZONE ?? 'Europe/Madrid',
-    debounceMs: 1500,
-    pollMs: 2000,
+    debounceMs: 600,
+    pollMs: 250,
+    streamWindowMs: 3000,
   };
 }

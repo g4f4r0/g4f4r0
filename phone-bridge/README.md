@@ -11,11 +11,13 @@ sequenceDiagram
   participant C as Capy thread GFR-4
   J->>T: calls the number
   T->>W: call.initiated (signed)
-  W->>T: answer (only if the caller is ALLOWED_CALLER, else reject)
+  W->>C: start message (only if the caller is ALLOWED_CALLER, else reject)
+  C-->>W: Axo's greeting over GET /threads/{id}/stream
+  W->>T: answer, then speak the greeting
   T->>W: call.transcription (final text)
   W->>C: POST /threads/{id}/message
-  W->>C: poll GET /messages?after={id}
-  W->>T: speak (Axo's reply)
+  C-->>W: each reply message as it commits
+  W->>T: speak it
   T->>J: Axo's voice
 ```
 
@@ -23,8 +25,11 @@ sequenceDiagram
 
 - Inbound: only `ALLOWED_CALLER` is answered. Any other number, and anonymous callers, are rejected with a Telnyx `reject` before anything reaches Axo.
 - Every webhook is verified with Telnyx's Ed25519 signature (`telnyx-signature-ed25519`, `telnyx-timestamp`, five minute replay window). A failed check returns 401 and nothing is processed.
-- What Johan says is sent to the thread as `[phone call] ...`; the first message of a call also tells Axo that the reply is spoken, in which language, and to keep it short and plain. Replies are cleaned of markdown and links and cut at `MAX_SPOKEN_CHARS`.
-- Axo often needs more than a few seconds. After `HOLD_AFTER_SECONDS` without a reply the caller hears a holding phrase, then "still working" every 30 seconds, and after `REPLY_TIMEOUT_SECONDS` the call ends with a note that the answer will be in the thread.
+- A call opens with a `<phone_call event="start">` message naming the caller, the local time and how to talk on the phone. The phone keeps ringing until Axo's greeting lands, so the first thing Johan hears is Axo; after `GREETING_TIMEOUT_SECONDS` the bridge answers with "Hey Johan." and speaks Axo's greeting when it arrives.
+- What Johan says is sent as `[phone call] ...` with `interrupt` delivery. The bridge reads the thread's live stream and speaks each assistant message the moment it commits, cleaned of markdown and links and cut at `MAX_SPOKEN_CHARS`.
+- If Johan talks over Axo, playback stops, the rest of that reply is dropped, and his words go to Axo. Transcripts that match what the bridge just said are ignored as echo.
+- After `IDLE_SECONDS` of silence Axo is asked to check in; after another `IDLE_SECONDS` it says goodbye and the call hangs up. When a call ends, a `<phone_call event="end">` message with the duration and who hung up is queued in the thread.
+- After `HOLD_AFTER_SECONDS` without a reply the caller hears "One moment.", then "still working" every 30 seconds, and after `REPLY_TIMEOUT_SECONDS` the call ends with a note that the answer will be in the thread.
 - Hard caps: a call ends after `MAX_CALL_SECONDS` (default 600) and at most `MAX_OUTBOUND_PER_DAY` (default 10) outbound calls are placed per calendar day in `TIMEZONE`. Rejected and unauthorized attempts do not count.
 - The bridge speaks every assistant message that lands in the thread after the message it sent. If another agent wakes Axo during a call, that unrelated reply is spoken too.
 
@@ -52,11 +57,14 @@ Plain variables live in `wrangler.toml` and can be changed per deploy:
 | `LANGUAGE` | `en` | `en` or `es`: speech recognition language, voice, fixed phrases, and the language Axo is asked to answer in |
 | `MAX_CALL_SECONDS` | `600` | Hard cap on one call |
 | `MAX_OUTBOUND_PER_DAY` | `10` | Hard cap on outbound calls per day |
-| `HOLD_AFTER_SECONDS` | `8` | Silence before the holding phrase |
+| `HOLD_AFTER_SECONDS` | `6` | Silence before the holding phrase |
 | `REPLY_TIMEOUT_SECONDS` | `180` | How long to wait for Axo before giving up |
 | `MAX_SPOKEN_CHARS` | `700` | Longest reply read aloud per message |
 | `CAPY_THREAD_ID` | GFR-4's id | Thread that receives the calls |
-| `CAPY_DELIVERY` | `interrupt` | How the message reaches a working thread: `interrupt`, `steer` or `queue` |
+| `IDLE_SECONDS` | `20` | Silence before Axo checks in, and again before it says goodbye |
+| `GREETING_TIMEOUT_SECONDS` | `8` | Longest ring before answering without Axo's greeting |
+| `CALLER_NAME` | `Johan` | Name used in the start message and fallback greeting |
+| `KEYTERMS` | `Axo,Capy,Johan,g4f4r0,Telnyx,Cloudflare,GitHub` | Words speech recognition is biased toward |
 | `TIMEZONE` | `Europe/Madrid` | Day boundary for the outbound cap |
 | `VOICE`, `STT_ENGINE`, `STT_MODEL` | per language, `Deepgram`, `deepgram/nova-3` | Telnyx voice and transcription engine overrides |
 | `TELNYX_CONNECTION_ID` | set in `wrangler.toml` | Id of the Telnyx Call Control application (named g4f4r0-axo) the number is assigned to |

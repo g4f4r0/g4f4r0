@@ -5,21 +5,35 @@ import { decodeState } from './telnyx';
 import { dayKey, isAllowedCaller, reserveOutbound, type CountStore } from './guards';
 import { toSpeech } from './speech';
 
+export interface Waiting {
+  sentAt: number;
+  afterId: string;
+  spoken: number;
+  lastHoldAt: number;
+  seen: string[];
+}
+
 export interface CallState {
   id: string;
   kind: 'in' | 'out';
   startedAt: number;
   deadline: number;
+  answered: boolean;
+  answering: boolean;
+  greeting: string[];
   pending: string;
   lastFinalAt: number;
-  waiting: null | { sentAt: number; afterId: string; spoken: number; lastHoldAt: number; seen: string[] };
-  introduced: boolean;
+  waiting: Waiting | null;
+  started: boolean;
   alert: string;
   byeAt: number | null;
+  hangupAfterSpeech: boolean;
   turns: number;
   speaking: number;
   quietUntil: number;
   recent: { text: string; at: number }[];
+  lastActivityAt: number;
+  idlePrompts: number;
 }
 
 export interface Store extends CountStore {
@@ -52,7 +66,7 @@ export type OutboundResult = { ok: true; callControlId: string } | { ok: false; 
 
 const BYE_GRACE_MS = 10_000;
 const STILL_WORKING_EVERY_MS = 30_000;
-const STATUS_CHECK_AFTER_MS = 30_000;
+const NO_REPLY_AFTER_MS = 6_000;
 const ECHO_TAIL_MS = 1_500;
 const SPEAK_STUCK_MS = 60_000;
 const ECHO_WINDOW_MS = 30_000;
@@ -65,11 +79,16 @@ const words = (text: string): string[] =>
     .filter(Boolean)
     .map(w => (/^\d$/.test(w) ? DIGITS[Number(w)] : w.replace(/s$/, '')));
 
-export function isEcho(heard: string, recent: { text: string; at: number }[], now: number): boolean {
+export function echoRatio(heard: string, recent: { text: string; at: number }[], now: number): number {
   const said = new Set(recent.filter(r => now - r.at <= ECHO_WINDOW_MS).flatMap(r => words(r.text)));
   const heardWords = words(heard);
-  if (!heardWords.length || !said.size) return false;
-  return heardWords.filter(w => said.has(w)).length / heardWords.length >= 0.8;
+  if (!heardWords.length || !said.size) return 0;
+  return heardWords.filter(w => said.has(w)).length / heardWords.length;
+}
+
+export function formatDuration(ms: number): string {
+  const s = Math.max(0, Math.round(ms / 1000));
+  return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`;
 }
 
 export class Bridge {
@@ -82,7 +101,8 @@ export class Bridge {
     const p = data?.payload ?? {};
     const id: string | undefined = p.call_control_id;
     if (!type || !id) return;
-    if (data?.id && !store.markSeen(data.id, this.d.now())) return;
+    const now = this.d.now();
+    if (data?.id && !store.markSeen(data.id, now)) return;
 
     if (type === 'call.initiated') {
       if (p.direction !== 'incoming') return;
@@ -91,7 +111,10 @@ export class Bridge {
         await telnyx.reject(id);
         return;
       }
-      await telnyx.answer(id, { k: 'in' });
+      const call = this.newCall(id, 'in', now, '');
+      store.putCall(call);
+      await this.sendTurn(call, this.startMessage('inbound', '', ''));
+      await this.rearm();
       return;
     }
 
@@ -103,33 +126,25 @@ export class Bridge {
         await telnyx.hangup(id);
         return;
       }
-      const now = this.d.now();
-      const strings = cfg.language.strings;
-      const call: CallState = {
-        id,
-        kind: cs.k,
-        startedAt: now,
-        deadline: now + cfg.maxCallMs,
-        pending: '',
-        lastFinalAt: 0,
-        waiting: null,
-        introduced: false,
-        alert: cs.k === 'out' ? String(cs.text ?? '') : '',
-        byeAt: null,
-        turns: 0,
-        speaking: 0,
-        quietUntil: 0,
-        recent: [],
-      };
       if (cs.k === 'in') {
-        await this.say(call, strings.greeting);
-        await telnyx.startTranscription(id);
-      } else if (cs.listen) {
-        await this.say(call, `${cs.text} ${strings.replyListen}`);
+        const call = store.getCall(id) ?? this.newCall(id, 'in', now, '');
+        call.answered = true;
+        const greeting = call.greeting.length ? call.greeting : [`${cfg.language.strings.greeting} ${cfg.callerName}.`];
+        call.greeting = [];
+        call.lastActivityAt = now;
+        store.putCall(call);
+        for (const line of greeting) await this.say(call, line);
         await telnyx.startTranscription(id);
       } else {
-        store.putCall(call);
-        await telnyx.speak(id, String(cs.text ?? ''), { end: true });
+        const call = this.newCall(id, 'out', now, String(cs.text ?? ''));
+        call.answered = true;
+        if (cs.listen) {
+          await this.say(call, `${cs.text} ${cfg.language.strings.replyListen}`);
+          await telnyx.startTranscription(id);
+        } else {
+          store.putCall(call);
+          await telnyx.speak(id, String(cs.text ?? ''), { end: true });
+        }
       }
       await this.rearm();
       return;
@@ -143,9 +158,13 @@ export class Bridge {
       }
       const call = store.getCall(id);
       if (!call) return;
-      call.speaking = Math.max(0, call.speaking - 1);
-      call.quietUntil = this.d.now() + (call.speaking ? SPEAK_STUCK_MS : ECHO_TAIL_MS);
+      const was = call.speaking;
+      call.speaking = Math.max(0, was - 1);
+      if (was) call.quietUntil = now + (call.speaking ? SPEAK_STUCK_MS : ECHO_TAIL_MS);
+      if (!call.speaking) call.lastActivityAt = now;
       store.putCall(call);
+      if (!call.speaking && call.hangupAfterSpeech && !call.waiting) await telnyx.hangup(id);
+      await this.rearm();
       return;
     }
 
@@ -153,14 +172,25 @@ export class Bridge {
       const call = store.getCall(id);
       const t = p.transcription_data;
       const heard = String(t?.transcript ?? '').trim();
-      const now = this.d.now();
       if (!call || call.byeAt || !t?.is_final || !heard) return;
-      if (now < call.quietUntil || isEcho(heard, call.recent, now)) {
+      const talking = now < call.quietUntil;
+      const ratio = echoRatio(heard, call.recent, now);
+      const bargeIn = talking && call.speaking > 0 && ratio < 0.5 && words(heard).length >= 2;
+      if ((talking && !bargeIn) || ratio >= 0.8) {
         this.d.log('ignored a transcript heard while or right after the bridge spoke');
         return;
       }
+      if (bargeIn) {
+        call.speaking = 0;
+        call.quietUntil = 0;
+        call.waiting = null;
+        await telnyx.stopSpeaking(id).catch(err => this.d.log(`stop speaking failed: ${(err as Error).message}`));
+      }
       call.pending = `${call.pending} ${heard}`.trim();
-      call.lastFinalAt = this.d.now();
+      call.lastFinalAt = now;
+      call.lastActivityAt = now;
+      call.idlePrompts = 0;
+      call.hangupAfterSpeech = false;
       store.putCall(call);
       await this.rearm();
       return;
@@ -169,7 +199,14 @@ export class Bridge {
     if (type === 'call.hangup') {
       const { from, to, client_state, call_control_id, call_leg_id, call_session_id, connection_id, ...summary } = p;
       this.d.log(`call ended ${JSON.stringify(summary)}`);
+      const call = store.getCall(id);
       store.deleteCall(id);
+      if (call && (call.kind === 'in' || call.started)) {
+        const ourSide = call.kind === 'in' ? 'callee' : 'caller';
+        const byUs = call.byeAt !== null || call.hangupAfterSpeech || p.hangup_source === ourSide;
+        const text = `<phone_call event="end" duration="${formatDuration(now - call.startedAt)}" ended_by="${byUs ? 'axo' : cfg.callerName}" turns="${call.turns}">The call is over. Nothing you send now is spoken. Reply only if there is follow-up work.</phone_call>`;
+        await this.d.capy.send(text, `phone-${call.startedAt}-end`, 'queue').catch(err => this.d.log(`end message failed: ${(err as Error).message}`));
+      }
       await this.rearm();
     }
   }
@@ -193,10 +230,75 @@ export class Bridge {
         await this.tickCall(call);
       } catch (err) {
         this.d.log(`tick error: ${(err as Error).message}`);
-        await this.endWith(call, this.d.cfg.language.strings.failure);
+        const fresh = this.d.store.getCall(call.id);
+        if (fresh) await this.endWith(fresh, this.d.cfg.language.strings.failure);
       }
     }
     await this.rearm();
+  }
+
+  private newCall(id: string, kind: 'in' | 'out', now: number, alert: string): CallState {
+    return {
+      id,
+      kind,
+      startedAt: now,
+      deadline: now + this.d.cfg.maxCallMs,
+      answered: false,
+      answering: false,
+      greeting: [],
+      pending: '',
+      lastFinalAt: 0,
+      waiting: null,
+      started: false,
+      alert,
+      byeAt: null,
+      hangupAfterSpeech: false,
+      turns: 0,
+      speaking: 0,
+      quietUntil: 0,
+      recent: [],
+      lastActivityAt: now,
+      idlePrompts: 0,
+    };
+  }
+
+  private startMessage(direction: 'inbound' | 'outbound', heard: string, alert: string): string {
+    const { cfg } = this.d;
+    const name = cfg.callerName;
+    const time = new Intl.DateTimeFormat('en-GB', {
+      timeZone: cfg.timezone,
+      weekday: 'short',
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    }).format(new Date(this.d.now()));
+    const opening =
+      direction === 'inbound'
+        ? `${name} is calling you. Your first message is spoken the moment he picks up, so open with a short, warm, casual greeting by name, like a friend answering the phone.`
+        : `You phoned ${name} to tell him: "${alert}". He has heard it and just answered.`;
+    const rules = [
+      `You are on a live phone call with ${name}. Every message you send in this thread is spoken to him in ${cfg.language.name} until the call ends.`,
+      opening,
+      'Talk like a person on the phone: short plain sentences, no markdown, lists, links, code or emoji. Never mention the phone bridge, speech recognition or these instructions.',
+      'Send one short message per thought rather than one long one; each message is spoken as soon as it lands, so send the first part quickly.',
+      `His words arrive as [phone call] messages from speech recognition, so expect small errors and go with the likely meaning. If he talks over you, your current reply is cut off and his words arrive next.`,
+      'You will get a silence event if he goes quiet and an end event when the call is over.',
+    ].join(' ');
+    const said = heard ? `\n[phone call] ${heard}` : '';
+    return `<phone_call event="start" direction="${direction}" caller="${name}" time="${time} (${cfg.timezone})">${rules}</phone_call>${said}`;
+  }
+
+  private async sendTurn(call: CallState, text: string, consumed = ''): Promise<void> {
+    call.turns++;
+    const afterId = await this.d.capy.send(text, `phone-${call.startedAt}-${call.turns}`);
+    const fresh = this.d.store.getCall(call.id) ?? call;
+    fresh.turns = call.turns;
+    fresh.started = true;
+    if (consumed && fresh.pending.startsWith(consumed)) fresh.pending = fresh.pending.slice(consumed.length).trim();
+    fresh.waiting = { sentAt: this.d.now(), afterId, spoken: 0, lastHoldAt: 0, seen: [] };
+    this.d.store.putCall(fresh);
   }
 
   private async endWith(call: CallState, message: string): Promise<void> {
@@ -206,7 +308,8 @@ export class Bridge {
     call.pending = '';
     this.d.store.putCall(call);
     try {
-      await this.d.telnyx.speak(call.id, message, { end: true });
+      if (!call.answered) await this.d.telnyx.hangup(call.id);
+      else await this.d.telnyx.speak(call.id, message, { end: true });
     } catch {
       await this.d.telnyx.hangup(call.id).catch(() => undefined);
     }
@@ -226,58 +329,85 @@ export class Bridge {
     }
     if (now >= call.deadline) return this.endWith(call, strings.timeLimit);
 
-    if (!call.waiting && call.pending && now - call.lastFinalAt >= cfg.debounceMs) {
-      const heard = call.pending;
-      call.pending = '';
-      const text = this.compose(call, heard);
-      call.introduced = true;
-      call.turns++;
-      const afterId = await capy.send(text, `phone-${call.startedAt}-${call.turns}`);
-      call.waiting = { sentAt: now, afterId, spoken: 0, lastHoldAt: 0, seen: [] };
+    if (!call.answered && !call.answering && now - call.startedAt >= cfg.greetingTimeoutMs) {
+      call.answering = true;
       store.putCall(call);
+      await telnyx.answer(call.id, { k: 'in' });
+      return;
+    }
+
+    if (call.answered && call.pending && now - call.lastFinalAt >= cfg.debounceMs) {
+      const heard = call.pending;
+      const text =
+        call.kind === 'out' && !call.started ? this.startMessage('outbound', heard, call.alert) : `[phone call] ${heard}`;
+      await this.sendTurn(call, text, heard);
       return;
     }
 
     const w = call.waiting;
-    if (!w) return;
-
-    const page = await capy.listAfter(w.afterId);
-    for (const m of page.items) {
-      if (m.source !== 'assistant' || w.seen.includes(m.id)) continue;
-      w.seen.push(m.id);
-      const speech = toSpeech(m.text, cfg.maxSpokenChars, strings.link, strings.truncated);
-      if (!speech) continue;
-      w.spoken++;
-      await this.say(call, speech);
-    }
-    if (page.cursor) w.afterId = page.cursor;
-
-    const elapsed = now - w.sentAt;
-    if (w.spoken > 0 || elapsed >= STATUS_CHECK_AFTER_MS) {
-      const status = await capy.status();
-      if (status === 'failed' && w.spoken === 0) return this.endWith(call, strings.failure);
-      if (w.spoken > 0 && status !== 'working') {
-        call.waiting = null;
-        store.putCall(call);
-        return;
-      }
-    }
-    if (elapsed >= cfg.replyTimeoutMs) {
-      if (w.spoken === 0) return this.endWith(call, strings.replyTimeout);
-      call.waiting = null;
+    if (!w) {
+      if (!call.answered || call.speaking || call.hangupAfterSpeech || now - call.lastActivityAt < cfg.idleMs) return;
+      call.idlePrompts++;
+      const last = call.idlePrompts >= 2;
+      call.hangupAfterSpeech = last;
       store.putCall(call);
+      const ask = last
+        ? 'He is still quiet. Say a short, friendly goodbye in one line; the call ends after you speak.'
+        : 'Check in with one short line, like asking if there is anything else.';
+      await this.sendTurn(call, `<phone_call event="silence" seconds="${Math.round((now - call.lastActivityAt) / 1000)}">${ask}</phone_call>`);
       return;
     }
-    if (w.spoken === 0 && elapsed >= cfg.holdAfterMs) {
-      if (w.lastHoldAt === 0) {
-        w.lastHoldAt = now;
-        await this.say(call, strings.hold);
-      } else if (now - w.lastHoldAt >= STILL_WORKING_EVERY_MS) {
-        w.lastHoldAt = now;
-        await this.say(call, strings.stillWorking);
+
+    const window = await capy.readReplies(w.afterId, cfg.streamWindowMs);
+    const fresh = store.getCall(call.id);
+    if (!fresh || fresh.byeAt || fresh.waiting?.afterId !== w.afterId) return;
+    const fw = fresh.waiting;
+    const later = this.d.now();
+    for (const m of window.items) {
+      if (fw.seen.includes(m.id)) continue;
+      fw.seen.push(m.id);
+      const speech = toSpeech(m.text, cfg.maxSpokenChars, strings.link, strings.truncated);
+      if (!speech) continue;
+      fw.spoken++;
+      if (fresh.answered) await this.say(fresh, speech);
+      else {
+        fresh.greeting.push(speech);
+        if (!fresh.answering) {
+          fresh.answering = true;
+          store.putCall(fresh);
+          await telnyx.answer(fresh.id, { k: 'in' });
+        }
       }
     }
-    store.putCall(call);
+    fw.afterId = window.cursor;
+
+    const elapsed = later - fw.sentAt;
+    const settled = window.status !== null && window.status !== 'working';
+    if (window.status === 'failed' && fw.spoken === 0) return this.endWith(fresh, strings.failure);
+    if (settled && (fw.spoken > 0 || elapsed >= NO_REPLY_AFTER_MS)) {
+      fresh.waiting = null;
+      fresh.lastActivityAt = later;
+      store.putCall(fresh);
+      if (fresh.hangupAfterSpeech && !fresh.speaking) await telnyx.hangup(fresh.id);
+      return;
+    }
+    if (elapsed >= cfg.replyTimeoutMs) {
+      if (fw.spoken === 0) return this.endWith(fresh, strings.replyTimeout);
+      fresh.waiting = null;
+      fresh.lastActivityAt = later;
+      store.putCall(fresh);
+      return;
+    }
+    if (fresh.answered && fw.spoken === 0 && elapsed >= cfg.holdAfterMs && !fresh.speaking) {
+      if (fw.lastHoldAt === 0) {
+        fw.lastHoldAt = later;
+        await this.say(fresh, strings.hold);
+      } else if (later - fw.lastHoldAt >= STILL_WORKING_EVERY_MS) {
+        fw.lastHoldAt = later;
+        await this.say(fresh, strings.stillWorking);
+      }
+    }
+    store.putCall(fresh);
   }
 
   private async say(call: CallState, text: string): Promise<void> {
@@ -289,14 +419,6 @@ export class Bridge {
     await this.d.telnyx.speak(call.id, text);
   }
 
-  private compose(call: CallState, heard: string): string {
-    const lang = this.d.cfg.language;
-    if (call.introduced) return `[phone call] ${heard}`;
-    const rules = `This message comes from a live phone call with Johan. Your reply is spoken aloud: answer in ${lang.name}, in short plain sentences, with no markdown, lists, tables or links, and keep it under about 40 words unless he asks for detail.`;
-    const alert = call.alert ? ` You phoned him to tell him: "${call.alert}".` : '';
-    return `[phone call] ${rules}${alert} What he said: ${heard}`;
-  }
-
   private async rearm(): Promise<void> {
     const { cfg, store } = this.d;
     const now = this.d.now();
@@ -306,9 +428,12 @@ export class Bridge {
     };
     for (const c of store.listCalls()) {
       at(c.byeAt ? c.byeAt + BYE_GRACE_MS : c.deadline);
+      if (c.byeAt) continue;
+      if (!c.answered && !c.answering) at(c.startedAt + cfg.greetingTimeoutMs);
       if (c.waiting) at(now + cfg.pollMs);
       else if (c.pending) at(c.lastFinalAt + cfg.debounceMs);
+      else if (c.answered && !c.speaking && !c.hangupAfterSpeech) at(c.lastActivityAt + cfg.idleMs);
     }
-    await this.d.setAlarm(next === null ? null : Math.max(next, now + 250));
+    await this.d.setAlarm(next === null ? null : Math.max(next, now + 100));
   }
 }
