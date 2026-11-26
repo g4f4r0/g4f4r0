@@ -17,6 +17,9 @@ export interface CallState {
   alert: string;
   byeAt: number | null;
   turns: number;
+  speaking: number;
+  quietUntil: number;
+  recent: { text: string; at: number }[];
 }
 
 export interface Store extends CountStore {
@@ -50,6 +53,24 @@ export type OutboundResult = { ok: true; callControlId: string } | { ok: false; 
 const BYE_GRACE_MS = 10_000;
 const STILL_WORKING_EVERY_MS = 30_000;
 const STATUS_CHECK_AFTER_MS = 30_000;
+const ECHO_TAIL_MS = 1_500;
+const SPEAK_STUCK_MS = 60_000;
+const ECHO_WINDOW_MS = 30_000;
+const DIGITS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine'];
+
+const words = (text: string): string[] =>
+  text
+    .toLowerCase()
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter(Boolean)
+    .map(w => (/^\d$/.test(w) ? DIGITS[Number(w)] : w.replace(/s$/, '')));
+
+export function isEcho(heard: string, recent: { text: string; at: number }[], now: number): boolean {
+  const said = new Set(recent.filter(r => now - r.at <= ECHO_WINDOW_MS).flatMap(r => words(r.text)));
+  const heardWords = words(heard);
+  if (!heardWords.length || !said.size) return false;
+  return heardWords.filter(w => said.has(w)).length / heardWords.length >= 0.8;
+}
 
 export class Bridge {
   constructor(private d: Deps) {}
@@ -84,7 +105,7 @@ export class Bridge {
       }
       const now = this.d.now();
       const strings = cfg.language.strings;
-      store.putCall({
+      const call: CallState = {
         id,
         kind: cs.k,
         startedAt: now,
@@ -96,14 +117,18 @@ export class Bridge {
         alert: cs.k === 'out' ? String(cs.text ?? '') : '',
         byeAt: null,
         turns: 0,
-      });
+        speaking: 0,
+        quietUntil: 0,
+        recent: [],
+      };
       if (cs.k === 'in') {
-        await telnyx.speak(id, strings.greeting);
+        await this.say(call, strings.greeting);
         await telnyx.startTranscription(id);
       } else if (cs.listen) {
-        await telnyx.speak(id, `${cs.text} ${strings.replyListen}`);
+        await this.say(call, `${cs.text} ${strings.replyListen}`);
         await telnyx.startTranscription(id);
       } else {
+        store.putCall(call);
         await telnyx.speak(id, String(cs.text ?? ''), { end: true });
       }
       await this.rearm();
@@ -112,15 +137,29 @@ export class Bridge {
 
     if (type === 'call.speak.ended') {
       const cs = decodeState(p.client_state);
-      if (cs?.end) await telnyx.hangup(id);
+      if (cs?.end) {
+        await telnyx.hangup(id);
+        return;
+      }
+      const call = store.getCall(id);
+      if (!call) return;
+      call.speaking = Math.max(0, call.speaking - 1);
+      call.quietUntil = this.d.now() + (call.speaking ? SPEAK_STUCK_MS : ECHO_TAIL_MS);
+      store.putCall(call);
       return;
     }
 
     if (type === 'call.transcription') {
       const call = store.getCall(id);
       const t = p.transcription_data;
-      if (!call || call.byeAt || !t?.is_final || !String(t.transcript ?? '').trim()) return;
-      call.pending = `${call.pending} ${String(t.transcript).trim()}`.trim();
+      const heard = String(t?.transcript ?? '').trim();
+      const now = this.d.now();
+      if (!call || call.byeAt || !t?.is_final || !heard) return;
+      if (now < call.quietUntil || isEcho(heard, call.recent, now)) {
+        this.d.log('ignored a transcript heard while or right after the bridge spoke');
+        return;
+      }
+      call.pending = `${call.pending} ${heard}`.trim();
       call.lastFinalAt = this.d.now();
       store.putCall(call);
       await this.rearm();
@@ -209,7 +248,7 @@ export class Bridge {
       const speech = toSpeech(m.text, cfg.maxSpokenChars, strings.link, strings.truncated);
       if (!speech) continue;
       w.spoken++;
-      await telnyx.speak(call.id, speech);
+      await this.say(call, speech);
     }
     if (page.cursor) w.afterId = page.cursor;
 
@@ -232,13 +271,22 @@ export class Bridge {
     if (w.spoken === 0 && elapsed >= cfg.holdAfterMs) {
       if (w.lastHoldAt === 0) {
         w.lastHoldAt = now;
-        await telnyx.speak(call.id, strings.hold);
+        await this.say(call, strings.hold);
       } else if (now - w.lastHoldAt >= STILL_WORKING_EVERY_MS) {
         w.lastHoldAt = now;
-        await telnyx.speak(call.id, strings.stillWorking);
+        await this.say(call, strings.stillWorking);
       }
     }
     store.putCall(call);
+  }
+
+  private async say(call: CallState, text: string): Promise<void> {
+    const now = this.d.now();
+    call.speaking++;
+    call.quietUntil = now + SPEAK_STUCK_MS;
+    call.recent = [...call.recent.filter(r => now - r.at <= ECHO_WINDOW_MS), { text, at: now }];
+    this.d.store.putCall(call);
+    await this.d.telnyx.speak(call.id, text);
   }
 
   private compose(call: CallState, heard: string): string {

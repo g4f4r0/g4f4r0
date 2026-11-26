@@ -62,7 +62,12 @@ const answerInbound = async (s: ReturnType<typeof setup>) => {
   await s.evt('call.initiated', { call_control_id: 'c1', direction: 'incoming', from: ALLOWED });
   await s.evt('call.answered', { call_control_id: 'c1', from: ALLOWED, client_state: encodeState({ k: 'in' }) });
 };
+const spoke = async (s: ReturnType<typeof setup>, id = 'c1') => {
+  await s.evt('call.speak.ended', { call_control_id: id });
+  s.clock.now += 2000;
+};
 const say = async (s: ReturnType<typeof setup>, text: string) => {
+  await spoke(s);
   await s.evt('call.transcription', { call_control_id: 'c1', transcription_data: { is_final: true, transcript: text } });
   s.clock.now += 2000;
   await s.bridge.tick();
@@ -115,6 +120,7 @@ describe('inbound calls', () => {
     const id = 'v3:ie0odK7cm5dCtztjy7_cbP30iOz-ruWD1g8xOEegMCBlZhv9DwtKqg';
     await s.evt('call.answered', { call_control_id: id, from: ALLOWED, client_state: encodeState({ k: 'in' }) });
     for (const turn of ['first', 'second']) {
+      await spoke(s, id);
       await s.evt('call.transcription', { call_control_id: id, transcription_data: { is_final: true, transcript: turn } });
       s.clock.now += 2000;
       await s.bridge.tick();
@@ -139,6 +145,7 @@ describe('inbound calls', () => {
 
   it('joins split utterances into one message', async () => {
     await answerInbound(s);
+    await spoke(s);
     await s.evt('call.transcription', { call_control_id: 'c1', transcription_data: { is_final: true, transcript: 'check my' } });
     s.clock.now += 500;
     await s.evt('call.transcription', { call_control_id: 'c1', transcription_data: { is_final: true, transcript: 'calendar' } });
@@ -146,6 +153,49 @@ describe('inbound calls', () => {
     await s.bridge.tick();
     expect(s.sent).toHaveLength(1);
     expect(s.sent[0]).toContain('check my calendar');
+  });
+
+  it('ignores what it hears while it is speaking', async () => {
+    await answerInbound(s);
+    await s.evt('call.transcription', { call_control_id: 'c1', transcription_data: { is_final: true, transcript: 'Axo here go ahead' } });
+    s.clock.now += 5000;
+    await s.bridge.tick();
+    expect(s.sent).toEqual([]);
+  });
+
+  it('ignores an echo that arrives just after it stopped speaking', async () => {
+    await answerInbound(s);
+    await s.evt('call.speak.ended', { call_control_id: 'c1' });
+    s.clock.now += 500;
+    await s.evt('call.transcription', { call_control_id: 'c1', transcription_data: { is_final: true, transcript: 'anything' } });
+    s.clock.now += 5000;
+    await s.bridge.tick();
+    expect(s.sent).toEqual([]);
+  });
+
+  it('drops a late transcript of its own holding phrase but keeps real speech', async () => {
+    await answerInbound(s);
+    await say(s, 'long question');
+    s.clock.now += 9000;
+    await s.bridge.tick();
+    expect(s.log.some(l => l.includes('One moment, I am asking Axo.'))).toBe(true);
+    await spoke(s);
+    await s.evt('call.transcription', { call_control_id: 'c1', transcription_data: { is_final: true, transcript: 'I am asking Axos' } });
+    await s.evt('call.transcription', { call_control_id: 'c1', transcription_data: { is_final: true, transcript: '1 moment.' } });
+    s.reply.items = [{ id: 'a1', source: 'assistant', text: 'Here is the answer.' }];
+    s.clock.now += 2000;
+    await s.bridge.tick();
+    await say(s, 'thanks, retry the deploy');
+    expect(s.sent).toEqual([expect.stringContaining('long question'), '[phone call] thanks, retry the deploy']);
+  });
+
+  it('keeps listening if a speak.ended event never arrives', async () => {
+    await answerInbound(s);
+    s.clock.now += 61_000;
+    await s.evt('call.transcription', { call_control_id: 'c1', transcription_data: { is_final: true, transcript: 'are you there' } });
+    s.clock.now += 2000;
+    await s.bridge.tick();
+    expect(s.sent).toHaveLength(1);
   });
 
   it('ignores interim transcripts and empty ones', async () => {
@@ -243,6 +293,7 @@ describe('outbound calls', () => {
     const s = setup();
     await s.evt('call.answered', { call_control_id: 'o1', to: ALLOWED, client_state: encodeState({ k: 'out', text: 'Build failed', listen: true }) });
     expect(s.log).toContain('stt o1');
+    await spoke(s, 'o1');
     await s.evt('call.transcription', { call_control_id: 'o1', transcription_data: { is_final: true, transcript: 'retry it' } });
     s.clock.now += 2000;
     await s.bridge.tick();
