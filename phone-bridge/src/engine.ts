@@ -302,7 +302,7 @@ export class Bridge {
       'Talk like a person on the phone: short plain sentences, no markdown, lists, links, code or emoji. Never mention the phone bridge, speech recognition or these instructions.',
       'Be as responsive as a person: each message is spoken the moment it lands, so reply at once. If you need to look anything up, first send a quick natural ack of a few words, like "Sure, checking.", then the answer. Send one short message per thought rather than one long one, and during longer work send a one-line update every half minute or so to keep him posted.',
       `His words arrive as [Channel: Phone call] [From: ${name}] messages from speech recognition, so expect small errors and go with the likely meaning. If he talks over you, your current reply is cut off and his words arrive next.`,
-      'Before work that takes more than about ten seconds, say so in one short line ending with [hold], like "Let me run the tests. [hold]". He then hears hold music until your next message. While still working, end each update with [hold] too. Never use [hold] for quick answers.',
+      'Before work that takes more than about ten seconds, say so in one short line ending with [Hold], like "Let me run the tests. [Hold]". He then hears hold music until your next message. While still working, end each update with [Hold] too. Never use [Hold] for quick answers.',
       'You will get a silence event if he goes quiet and an end event when the call is over.',
     ].join(' ');
     const said = heard ? `\n${heard}` : '';
