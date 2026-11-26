@@ -66,3 +66,10 @@ describe('caps', () => {
     expect(callExpired(0, 600_000, 600_000)).toBe(true);
   });
 });
+
+describe('strict caller match', () => {
+  it('rejects a SIP URI that only contains the allowed digits', () => {
+    expect(isAllowedCaller('sip:+15555550100@attacker.example', '+15555550100')).toBe(false);
+    expect(isAllowedCaller('+1 (555) 555-0100', '+15555550100')).toBe(true);
+  });
+});

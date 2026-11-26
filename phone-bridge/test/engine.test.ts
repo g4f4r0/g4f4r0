@@ -4,7 +4,7 @@ import { parseConfig, type Env } from '../src/config';
 import { encodeState } from '../src/telnyx';
 import type { CapyMessage, ModelSelection } from '../src/capy';
 
-const ALLOWED = '+13072007045';
+const ALLOWED = '+15555550100';
 const REAL_ID = 'v3:ie0odK7cm5dCtztjy7_cbP30iOz-ruWD1g8xOEegMCBlZhv9DwtKqg';
 
 function setup(overrides: Partial<Env> = {}) {
@@ -14,17 +14,17 @@ function setup(overrides: Partial<Env> = {}) {
   const store: Store = {
     count: d => counts.get(d) ?? 0,
     increment: d => void counts.set(d, (counts.get(d) ?? 0) + 1),
-    getCall: id => structuredClone(calls.get(id)),
-    putCall: s => void calls.set(s.id, structuredClone(s)),
+    getCall: id => calls.get(id),
+    putCall: s => void calls.set(s.id, s),
     deleteCall: id => void calls.delete(id),
-    listCalls: () => [...calls.values()].map(c => structuredClone(c)),
+    listCalls: () => [...calls.values()],
     markSeen: id => (seen.has(id) ? false : (seen.add(id), true)),
   };
   const log: string[] = [];
   const sent: { text: string; key: string; delivery: string; model?: ModelSelection }[] = [];
   const axo = { queue: [] as CapyMessage[], status: 'working', worked: true, sendFails: 0, readFails: 0, models: { current: 'anthropic/claude-sonnet-5-5' as string | null, fast: ['anthropic/claude-opus-5-5'] }, live: [] as { callId: string; text: string }[], tool: false, stt: 'deepgram/nova-3' };
   const clock = { now: Date.UTC(2026, 10, 26, 18, 0) };
-  const env = { CALLER_PHONE_NUMBER: ALLOWED, TELNYX_PHONE_NUMBER: '+13072070207', TELNYX_CONNECTION_ID: 'c', CAPY_THREAD_ID: 'jam_x', ...overrides } as Env;
+  const env = { CALLER_PHONE_NUMBER: ALLOWED, TELNYX_PHONE_NUMBER: '+15555550199', TELNYX_CONNECTION_ID: 'c', CAPY_THREAD_ID: 'jam_x', ...overrides } as Env;
   const cfg = parseConfig(env);
   let m = 0;
   const bridge = new Bridge({
@@ -604,7 +604,8 @@ describe('outbound calls', () => {
     expect(s.log).toContain('stt o1');
     await s.say('retry it', 'o1');
     expect(s.sent[0].text).toMatch(/^\[Channel: Phone call\] \[Event: Outgoing call\] \[To: Johan\] /);
-    expect(s.sent[0].text).toContain('You phoned Johan about: "Build failed"');
+    expect(s.sent[0].text).toContain('You phoned Johan with the alert below.');
+    expect(s.sent[0].text).toContain('\n[Alert: Build failed]');
     expect(s.sent[0].text).toMatch(/\n\[Channel: Phone call\] \[From: Johan\] retry it$/);
   });
 

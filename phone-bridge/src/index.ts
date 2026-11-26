@@ -11,6 +11,7 @@ const MAX_ALERT_CHARS = 1000;
 export class PhoneBridge extends DurableObject<Env> {
   private sql = this.ctx.storage.sql;
   private readWake = new AbortController();
+  private live = new Map<string, CallState>();
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -28,12 +29,18 @@ export class PhoneBridge extends DurableObject<Env> {
       increment: day =>
         void sql.exec('INSERT INTO outbound_counts (day, n) VALUES (?, 1) ON CONFLICT(day) DO UPDATE SET n = n + 1', day),
       getCall: id => {
+        const cached = this.live.get(id);
+        if (cached) return cached;
         const row = sql.exec('SELECT state FROM calls WHERE id = ?', id).toArray()[0];
-        return row ? (JSON.parse(row.state as string) as CallState) : undefined;
+        if (!row) return undefined;
+        const state = JSON.parse(row.state as string) as CallState;
+        this.live.set(id, state);
+        return state;
       },
-      putCall: s => void sql.exec('INSERT OR REPLACE INTO calls (id, state) VALUES (?, ?)', s.id, JSON.stringify(s)),
-      deleteCall: id => void sql.exec('DELETE FROM calls WHERE id = ?', id),
-      listCalls: () => sql.exec('SELECT state FROM calls').toArray().map(r => JSON.parse(r.state as string) as CallState),
+      putCall: s => void (this.live.set(s.id, s), sql.exec('INSERT OR REPLACE INTO calls (id, state) VALUES (?, ?)', s.id, JSON.stringify(s))),
+      deleteCall: id => void (this.live.delete(id), sql.exec('DELETE FROM calls WHERE id = ?', id)),
+      listCalls: () =>
+        sql.exec('SELECT id FROM calls').toArray().map(r => this.store().getCall(r.id as string) as CallState),
       markSeen: (id, now) => {
         sql.exec('DELETE FROM seen WHERE at < ?', now - 3_600_000);
         if (sql.exec('SELECT 1 FROM seen WHERE id = ?', id).toArray().length) return false;

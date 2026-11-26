@@ -1,5 +1,5 @@
 export function normalizeNumber(raw: string | undefined | null): string {
-  if (!raw) return '';
+  if (!raw || !/^\+?[\d\s().-]+$/.test(raw.trim())) return '';
   const digits = raw.replace(/[^\d]/g, '');
   return digits ? '+' + digits : '';
 }
