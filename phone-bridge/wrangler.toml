@@ -1,0 +1,22 @@
+name = "phone-bridge"
+main = "src/index.ts"
+compatibility_date = "2026-11-01"
+workers_dev = true
+
+[[durable_objects.bindings]]
+name = "BRIDGE"
+class_name = "PhoneBridge"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["PhoneBridge"]
+
+[vars]
+LANGUAGE = "en"
+MAX_CALL_SECONDS = "600"
+MAX_OUTBOUND_PER_DAY = "10"
+HOLD_AFTER_SECONDS = "8"
+REPLY_TIMEOUT_SECONDS = "180"
+CAPY_THREAD_ID = "jam_01M8BQK35Z81JEZX344MC701XV"
+TIMEZONE = "Europe/Madrid"
+# Set at deploy time (not secrets): TELNYX_NUMBER, TELNYX_CONNECTION_ID
