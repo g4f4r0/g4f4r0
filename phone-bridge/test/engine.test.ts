@@ -71,7 +71,7 @@ describe('inbound calls', () => {
   let s: ReturnType<typeof setup>;
   beforeEach(() => void (s = setup()));
 
-  it('rejects a call from any other number without answering or reaching Otto', async () => {
+  it('rejects a call from any other number without answering or reaching Axo', async () => {
     await s.evt('call.initiated', { call_control_id: 'x1', direction: 'incoming', from: '+34600999888' });
     await s.evt('call.initiated', { call_control_id: 'x2', direction: 'incoming', from: 'anonymous' });
     expect(s.log).toEqual(['reject x1', 'reject x2']);
@@ -81,7 +81,7 @@ describe('inbound calls', () => {
   it('answers the allowed number, greets and starts listening', async () => {
     await answerInbound(s);
     expect(s.log[0]).toContain('answer c1');
-    expect(s.log).toContain('speak c1 Otto here. Go ahead.');
+    expect(s.log).toContain('speak c1 Axo here. Go ahead.');
     expect(s.log).toContain('stt c1');
   });
 
@@ -96,7 +96,7 @@ describe('inbound calls', () => {
     expect(s.log).toEqual([]);
   });
 
-  it('sends what he said to Otto and speaks the reply', async () => {
+  it('sends what he said to Axo and speaks the reply', async () => {
     await answerInbound(s);
     await say(s, 'what is on my calendar');
     expect(s.sent).toHaveLength(1);
@@ -140,7 +140,7 @@ describe('inbound calls', () => {
     expect(s.sent).toEqual([]);
   });
 
-  it('speaks a holding phrase when Otto is slow, then keeps waiting', async () => {
+  it('speaks a holding phrase when Axo is slow, then keeps waiting', async () => {
     await answerInbound(s);
     await say(s, 'long question');
     s.clock.now += 9000;
@@ -157,7 +157,7 @@ describe('inbound calls', () => {
     await say(s, 'long question');
     s.clock.now += 181_000;
     await s.bridge.tick();
-    expect(s.log.some(l => l.includes('Otto has not answered yet'))).toBe(true);
+    expect(s.log.some(l => l.includes('Axo has not answered yet'))).toBe(true);
   });
 
   it('ends the call at the length cap and hangs up', async () => {
@@ -206,7 +206,7 @@ describe('inbound calls', () => {
   it('speaks Spanish when configured', async () => {
     const es = setup({ LANGUAGE: 'es' });
     await answerInbound(es);
-    expect(es.log).toContain('speak c1 Habla Otto. Dime.');
+    expect(es.log).toContain('speak c1 Habla Axo. Dime.');
     await say(es, 'hola');
     expect(es.sent[0]).toContain('answer in Spanish');
   });
