@@ -65,6 +65,7 @@ export function createTelnyx(apiKey: string, cfg: Config, fetcher: typeof fetch 
           transcription_model: cfg.sttModel,
           language: cfg.language.stt,
           utterance_end_ms: cfg.utteranceEndMs,
+          interim_results: true,
           ...(cfg.keyterms.length ? { keyterms: cfg.keyterms } : {}),
         },
         transcription_tracks: 'inbound',

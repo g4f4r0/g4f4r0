@@ -24,6 +24,7 @@ describe('telnyx transcription_start', () => {
         transcription_model: 'deepgram/nova-3',
         language: 'en',
         utterance_end_ms: 800,
+        interim_results: true,
         keyterms: ['Axo', 'Capy', 'Johan', 'g4f4r0', 'Telnyx', 'Cloudflare', 'GitHub'],
       },
       transcription_tracks: 'inbound',

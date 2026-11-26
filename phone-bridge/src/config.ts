@@ -30,7 +30,7 @@ export interface Env {
 export interface Strings {
   greeting: string;
   goodbye: string;
-  hold: string;
+  fillers: string[];
   stillWorking: string;
   timeLimit: string;
   replyTimeout: string;
@@ -57,7 +57,7 @@ export const LANGUAGES: Record<string, Language> = {
     strings: {
       greeting: 'Hey',
       goodbye: 'Talk soon. Bye.',
-      hold: 'One moment.',
+      fillers: ['Mm, let me see.', 'Okay, give me a sec.', 'Hmm, good question.', 'Sure, one sec.', 'Alright, let me check.'],
       stillWorking: 'Still working on it.',
       timeLimit: 'This call has reached its time limit. Goodbye.',
       replyTimeout: 'Axo has not answered yet. The answer will be in the thread. Goodbye.',
@@ -75,7 +75,7 @@ export const LANGUAGES: Record<string, Language> = {
     strings: {
       greeting: 'Hola',
       goodbye: 'Hablamos. Adiós.',
-      hold: 'Un momento.',
+      fillers: ['Mmm, a ver.', 'Vale, dame un segundo.', 'Buena pregunta.', 'Claro, un momento.', 'Vale, déjame mirar.'],
       stillWorking: 'Sigo trabajando en ello.',
       timeLimit: 'La llamada ha alcanzado su límite de tiempo. Adiós.',
       replyTimeout: 'Axo aún no ha respondido. La respuesta estará en el hilo. Adiós.',
@@ -151,7 +151,7 @@ export function parseConfig(env: Env): Config {
     sttEngine: env.STT_ENGINE ?? 'Deepgram',
     sttModel: env.STT_MODEL ?? 'deepgram/nova-3',
     timezone: env.TIMEZONE ?? 'Europe/Madrid',
-    debounceMs: 600,
+    debounceMs: 1000,
     pollMs: 250,
     streamWindowMs: 3000,
   };

@@ -106,7 +106,7 @@ describe('inbound: picking up', () => {
     await s.ring();
     expect(s.sent).toHaveLength(1);
     const start = s.sent[0].text;
-    expect(start).toMatch(/^\[Phone call · inbound from Johan · Thu, 26 Nov 2026, 19:00 Europe\/Madrid\] /);
+    expect(start).toMatch(/^\[Phone call\] \[Incoming\] \[Johan\] \[Thu, 26 Nov 2026, 19:00 Europe\/Madrid\] /);
     expect(start).toContain('greeting by name');
     expect(start).toContain('Never mention the phone bridge');
     expect(s.log).toEqual([]);
@@ -174,7 +174,7 @@ describe('inbound: conversation', () => {
 
   it('sends his words as a short tagged turn and speaks every reply message in order', async () => {
     await s.say('what is on my calendar');
-    expect(s.sent[1]).toMatchObject({ text: '[Phone · Johan] what is on my calendar', delivery: 'interrupt' });
+    expect(s.sent[1]).toMatchObject({ text: '[Phone call] [Johan] what is on my calendar', delivery: 'interrupt' });
     s.reply('You have two meetings.', 'working');
     s.reply('The first is at **ten**.', 'idle');
     await s.tick();
@@ -199,14 +199,14 @@ describe('inbound: conversation', () => {
     s.clock.now += 300;
     await s.hear('calendar');
     await s.tick(1000);
-    expect(s.sent[1].text).toBe('[Phone · Johan] check my calendar');
+    expect(s.sent[1].text).toBe('[Phone call] [Johan] check my calendar');
   });
 
   it('sends a new utterance right away even while Axo is still thinking', async () => {
     await s.say('first question');
     await s.hear('actually never mind');
     await s.tick(1000);
-    expect(s.sent.map(x => x.text).slice(1)).toEqual(['[Phone · Johan] first question', '[Phone · Johan] actually never mind']);
+    expect(s.sent.map(x => x.text).slice(1)).toEqual(['[Phone call] [Johan] first question', '[Phone call] [Johan] actually never mind']);
   });
 
   it('stops speaking and passes his words on when he talks over Axo', async () => {
@@ -216,7 +216,7 @@ describe('inbound: conversation', () => {
     await s.hear('stop stop, just the summary');
     expect(s.log).toContain('stop c1');
     await s.tick(1000);
-    expect(s.sent.at(-1)).toMatchObject({ text: '[Phone · Johan] stop stop, just the summary', delivery: 'interrupt' });
+    expect(s.sent.at(-1)).toMatchObject({ text: '[Phone call] [Johan] stop stop, just the summary', delivery: 'interrupt' });
   });
 
   it('drops the rest of the cut-off reply and keeps hearing him after a barge-in', async () => {
@@ -231,31 +231,49 @@ describe('inbound: conversation', () => {
     await s.hear('what broke');
     await s.tick(1000);
     expect(s.spoken()).not.toContain('And then the migration ran for hours.');
-    expect(s.sent.at(-1)?.text).toBe('[Phone · Johan] wait a second what broke');
+    expect(s.sent.at(-1)?.text).toBe('[Phone call] [Johan] wait a second what broke');
   });
 
-  it('ignores its own voice while speaking and right after', async () => {
+  it('ignores its own voice and short backchannels while speaking, but hears him right after', async () => {
     await s.hear('Hey Johan what is up');
     await s.hear('okay');
     await s.evt('call.speak.ended', { call_control_id: 'c1' });
-    s.clock.now += 500;
-    await s.hear('anything at all');
+    await s.hear('Hey Johan, what is up');
+    s.clock.now += 300;
+    await s.hear('anything new today');
     await s.tick(5000);
-    expect(s.sent).toHaveLength(1);
     expect(s.log).not.toContain('stop c1');
+    expect(s.sent.map(x => x.text).slice(1)).toEqual(['[Phone call] [Johan] anything new today']);
+  });
+
+  it('waits while interim results show he is still talking', async () => {
+    await s.spoke();
+    await s.hear('can you check the');
+    const partial = (text: string) =>
+      s.evt('call.transcription', { call_control_id: 'c1', transcription_data: { is_final: false, transcript: text } });
+    s.clock.now += 800;
+    await partial('daily');
+    s.clock.now += 800;
+    await partial('daily brief for');
+    await s.tick(800);
+    expect(s.sent).toHaveLength(1);
+    await s.hear('daily brief for today');
+    await s.tick(1000);
+    expect(s.sent.at(-1)?.text).toBe('[Phone call] [Johan] can you check the daily brief for today');
   });
 
   it('drops a late echo of its own holding phrase but keeps real speech', async () => {
     await s.say('long question');
     await s.tick(7000);
-    expect(s.spoken()).toContain('One moment.');
+    const filler = s.spoken().at(-1) ?? '';
+    expect(s.cfg.language.strings.fillers).toContain(filler);
     await s.spoke();
-    await s.hear('1 moment.');
-    await s.hear('One moments');
+    await s.hear(filler.toLowerCase().replace(/[,.]/g, ''));
+    await s.hear(filler.replace('.', '!'));
     await s.tick(1000);
     expect(s.sent).toHaveLength(2);
     await s.say('thanks, retry the deploy');
-    expect(s.sent.at(-1)?.text).toBe('[Phone · Johan] thanks, retry the deploy');
+    expect(s.sent.at(-1)?.text).toBe('[Phone call] [Johan] thanks, retry the deploy');
   });
 
   it('puts him on hold right after Axo announces long work and cuts the music for the next message', async () => {
@@ -287,7 +305,7 @@ describe('inbound: conversation', () => {
   it('falls back to music after a long quiet stretch without the hold tag', async () => {
     await s.say('long question');
     await s.tick(7000);
-    expect(s.spoken().at(-1)).toBe('One moment.');
+    expect(s.cfg.language.strings.fillers).toContain(s.spoken().at(-1));
     await s.spoke();
     await s.tick(5000);
     expect(s.log.filter(l => l.startsWith('music'))).toEqual([]);
@@ -304,14 +322,14 @@ describe('inbound: conversation', () => {
     await s.hear('actually skip it');
     expect(s.log.at(-1)).toBe('stop c1');
     await s.tick(1000);
-    expect(s.sent.at(-1)?.text).toBe('[Phone · Johan] actually skip it');
+    expect(s.sent.at(-1)?.text).toBe('[Phone call] [Johan] actually skip it');
   });
 
   it('keeps listening if a speak.ended event never arrives', async () => {
     s.clock.now += 61_000;
     await s.hear('are you there');
     await s.tick(1000);
-    expect(s.sent.at(-1)?.text).toBe('[Phone · Johan] are you there');
+    expect(s.sent.at(-1)?.text).toBe('[Phone call] [Johan] are you there');
   });
 
   it('stops waiting quietly when Axo ends its turn without a message', async () => {
@@ -352,7 +370,7 @@ describe('inbound: silence and hang up', () => {
     await s.tick(17_000);
     expect(s.sent).toHaveLength(1);
     await s.tick(1_500);
-    expect(s.sent[1].text).toMatch(/^\[Phone · 2\d s of silence\] Check in/);
+    expect(s.sent[1].text).toMatch(/^\[Phone call\] \[Silence 2\ds\] Check in/);
     s.reply('Anything else?');
     await s.tick();
     await s.spoke();
@@ -377,7 +395,7 @@ describe('inbound: silence and hang up', () => {
     s.clock.now += 72_000;
     await s.evt('call.hangup', { call_control_id: 'c1', hangup_source: 'caller' });
     expect(s.sent.at(-1)?.delivery).toBe('queue');
-    expect(s.sent.at(-1)?.text).toMatch(/^\[Phone call ended · 1m 1\ds · Johan hung up · 1 turns\] /);
+    expect(s.sent.at(-1)?.text).toMatch(/^\[Phone call\] \[Ended\] \[1m 1\ds\] \[Johan hung up\] /);
     expect(s.store.getCall('c1')).toBeUndefined();
   });
 
@@ -432,9 +450,9 @@ describe('outbound calls', () => {
     await s.evt('call.answered', { call_control_id: 'o1', to: ALLOWED, client_state: encodeState({ k: 'out', text: 'Build failed', listen: true }) });
     expect(s.log).toContain('stt o1');
     await s.say('retry it', 'o1');
-    expect(s.sent[0].text).toMatch(/^\[Phone call · outbound to Johan · /);
+    expect(s.sent[0].text).toMatch(/^\[Phone call\] \[Outgoing\] \[Johan\] /);
     expect(s.sent[0].text).toContain('You phoned Johan to tell him: "Build failed"');
-    expect(s.sent[0].text).toMatch(/\n\[Phone · Johan\] retry it$/);
+    expect(s.sent[0].text).toMatch(/\n\[Phone call\] \[Johan\] retry it$/);
   });
 
   it('enforces the daily cap and never dials past it', async () => {

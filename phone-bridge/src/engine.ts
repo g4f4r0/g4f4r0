@@ -70,10 +70,9 @@ export type OutboundResult = { ok: true; callControlId: string } | { ok: false; 
 
 const BYE_GRACE_MS = 10_000;
 const STILL_WORKING_EVERY_MS = 30_000;
-const ECHO_TAIL_MS = 1_500;
 const SPEAK_STUCK_MS = 60_000;
 const ECHO_WINDOW_MS = 30_000;
-const speech = (name: string, heard: string): string => `[Phone · ${name}] ${heard}`;
+const speech = (name: string, heard: string): string => `[Phone call] [${name}] ${heard}`;
 const HOLD_TAG = /\[hold\]/gi;
 const DIGITS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine'];
 
@@ -163,9 +162,8 @@ export class Bridge {
       }
       const call = store.getCall(id);
       if (!call) return;
-      const was = call.speaking;
-      call.speaking = Math.max(0, was - 1);
-      if (was) call.quietUntil = now + (call.speaking ? SPEAK_STUCK_MS : ECHO_TAIL_MS);
+      call.speaking = Math.max(0, call.speaking - 1);
+      if (call.speaking) call.quietUntil = now + SPEAK_STUCK_MS;
       if (!call.speaking) call.lastActivityAt = now;
       const startMusic = !call.speaking && call.waiting?.holdAsked && !call.waiting.music && cfg.holdMusicUrl;
       if (startMusic && call.waiting) call.waiting.music = true;
@@ -180,11 +178,18 @@ export class Bridge {
       const call = store.getCall(id);
       const t = p.transcription_data;
       const heard = String(t?.transcript ?? '').trim();
-      if (!call || call.byeAt || !t?.is_final || !heard) return;
-      const talking = now < call.quietUntil;
+      if (!call || call.byeAt || !heard) return;
       const ratio = echoRatio(heard, call.recent, now);
-      const bargeIn = talking && call.speaking > 0 && ratio < 0.5 && words(heard).length >= 2;
-      if ((talking && !bargeIn) || ratio >= 0.8) {
+      if (!t?.is_final) {
+        if (!call.pending || ratio >= 0.8) return;
+        call.lastFinalAt = now;
+        store.putCall(call);
+        await this.rearm();
+        return;
+      }
+      const speakingNow = call.speaking > 0 && now < call.quietUntil;
+      const bargeIn = speakingNow && ratio < 0.5 && words(heard).length >= 2;
+      if ((speakingNow && !bargeIn) || ratio >= 0.8) {
         this.d.log('ignored a transcript heard while or right after the bridge spoke');
         return;
       }
@@ -214,7 +219,7 @@ export class Bridge {
       if (call && (call.kind === 'in' || call.started)) {
         const ourSide = call.kind === 'in' ? 'callee' : 'caller';
         const byUs = call.byeAt !== null || call.hangupAfterSpeech || p.hangup_source === ourSide;
-        const text = `[Phone call ended · ${formatDuration(now - call.startedAt)} · ${byUs ? 'Axo' : cfg.callerName} hung up · ${call.turns} turns] The call is over. Nothing you send now is spoken. Reply only if there is follow-up work.`;
+        const text = `[Phone call] [Ended] [${formatDuration(now - call.startedAt)}] [${byUs ? 'Axo' : cfg.callerName} hung up] The call is over. Nothing you send now is spoken. Reply only if there is follow-up work.`;
         await this.d.capy.send(text, `phone-${call.startedAt}-end`, 'queue').catch(err => this.d.log(`end message failed: ${(err as Error).message}`));
       }
       await this.rearm();
@@ -293,17 +298,17 @@ export class Bridge {
       opening,
       'Talk like a person on the phone: short plain sentences, no markdown, lists, links, code or emoji. Never mention the phone bridge, speech recognition or these instructions.',
       'Send one short message per thought rather than one long one; each message is spoken as soon as it lands, so send the first part quickly.',
-      `His words arrive as [Phone · ${name}] messages from speech recognition, so expect small errors and go with the likely meaning. If he talks over you, your current reply is cut off and his words arrive next.`,
+      `His words arrive as [Phone call] [${name}] messages from speech recognition, so expect small errors and go with the likely meaning. If he talks over you, your current reply is cut off and his words arrive next.`,
       'Before work that takes more than about ten seconds, say so in one short line ending with [hold], like "Let me run the tests. [hold]". He then hears hold music until your next message. Never use [hold] for quick answers.',
       'You will get a silence event if he goes quiet and an end event when the call is over.',
     ].join(' ');
-    const said = heard ? `\n${speech(name, heard)}` : '';
-    const header = direction === 'inbound' ? `inbound from ${name}` : `outbound to ${name}`;
-    return `[Phone call · ${header} · ${time} ${cfg.timezone}] ${rules}${said}`;
+    const said = heard ? `\n${heard}` : '';
+    return `[Phone call] [${direction === 'inbound' ? 'Incoming' : 'Outgoing'}] [${name}] [${time} ${cfg.timezone}] ${rules}${said}`;
   }
 
   private async sendTurn(call: CallState, text: string, consumed = ''): Promise<void> {
     call.turns++;
+    if (call.kind === 'out' && !call.started) text = this.startMessage('outbound', text, call.alert);
     const afterId = await this.d.capy.send(text, `phone-${call.startedAt}-${call.turns}`);
     const fresh = this.d.store.getCall(call.id) ?? call;
     fresh.turns = call.turns;
@@ -352,9 +357,7 @@ export class Bridge {
 
     if (call.answered && call.pending && now - call.lastFinalAt >= cfg.debounceMs) {
       const heard = call.pending;
-      const text =
-        call.kind === 'out' && !call.started ? this.startMessage('outbound', heard, call.alert) : speech(cfg.callerName, heard);
-      await this.sendTurn(call, text, heard);
+      await this.sendTurn(call, speech(cfg.callerName, heard), heard);
       return;
     }
 
@@ -368,7 +371,7 @@ export class Bridge {
       const ask = last
         ? 'He is still quiet. Say a short, friendly goodbye in one line; the call ends after you speak.'
         : 'Check in with one short line, like asking if there is anything else.';
-      await this.sendTurn(call, `[Phone · ${Math.round((now - call.lastActivityAt) / 1000)} s of silence] ${ask}`);
+      await this.sendTurn(call, `[Phone call] [Silence ${Math.round((now - call.lastActivityAt) / 1000)}s] ${ask}`);
       return;
     }
 
@@ -425,7 +428,7 @@ export class Bridge {
         await telnyx.playMusic(fresh.id, cfg.holdMusicUrl);
       } else if (fw.spoken === 0 && fw.lastHoldAt === 0 && quietFor >= cfg.holdAfterMs) {
         fw.lastHoldAt = later;
-        await this.say(fresh, strings.hold);
+        await this.say(fresh, strings.fillers[call.turns % strings.fillers.length]);
       } else if (!cfg.holdMusicUrl && fw.lastHoldAt !== 0 && later - fw.lastHoldAt >= STILL_WORKING_EVERY_MS) {
         fw.lastHoldAt = later;
         await this.say(fresh, strings.stillWorking);
