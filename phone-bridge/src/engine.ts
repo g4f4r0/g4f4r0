@@ -335,7 +335,7 @@ export class Bridge {
     const { cfg, store } = this.d;
     store.deleteCall(call.id);
     if (!call.threadId) return;
-    const text = `[Channel: Phone call] [Event: Call ended] [Duration: ${formatDuration(this.d.now() - call.startedAt)}] [Ended by: ${byUs ? 'Axo' : cfg.callerName}] The call is over and nothing you send is spoken. Report to your Captain now: a two or three line summary of the call and anything still to do.`;
+    const text = `[Channel: Phone call] [Event: Call ended] [Duration: ${formatDuration(this.d.now() - call.startedAt)}] [Ended by: ${byUs ? 'Axo' : cfg.callerName}] The call is over and nothing you send is spoken. Report to your Captain now, starting with \`[Channel: Phone call] [Event: Call summary] [With: ${cfg.callerName}] [Duration: ${formatDuration(this.d.now() - call.startedAt)}]\`, then two or three lines on what was said and anything still to do.`;
     await this.d.capy.send(call.threadId, text, `phone-${call.startedAt}-end`, 'queue').catch(err => this.d.log(`end message failed: ${(err as Error).message}`));
     store.archiveLater(call.threadId, this.d.now() + ARCHIVE_AFTER_MS);
   }
