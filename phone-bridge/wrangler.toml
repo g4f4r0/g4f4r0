@@ -3,6 +3,9 @@ main = "src/index.ts"
 compatibility_date = "2026-11-01"
 workers_dev = true
 
+[observability]
+enabled = true
+
 [[durable_objects.bindings]]
 name = "BRIDGE"
 class_name = "PhoneBridge"

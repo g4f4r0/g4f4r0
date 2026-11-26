@@ -18,7 +18,7 @@ export function createCapy(apiKey: string, cfg: Config, delivery: string, fetche
       ...init,
       headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' },
     });
-    if (!res.ok) throw new Error(`capy ${path || '/'} failed with ${res.status}`);
+    if (!res.ok) throw new Error(`capy ${path || '/'} failed with ${res.status}: ${(await res.text()).slice(0, 300)}`);
     return res.json();
   };
   return {

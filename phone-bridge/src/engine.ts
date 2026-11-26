@@ -193,7 +193,7 @@ export class Bridge {
       const text = this.compose(call, heard);
       call.introduced = true;
       call.turns++;
-      const afterId = await capy.send(text, `phone-${call.id}-${call.turns}`);
+      const afterId = await capy.send(text, `phone-${call.startedAt}-${call.turns}`);
       call.waiting = { sentAt: now, afterId, spoken: 0, lastHoldAt: 0, seen: [] };
       store.putCall(call);
       return;

@@ -31,6 +31,7 @@ function setup(overrides: Partial<Env> = {}) {
   } as Env;
   const cfg = parseConfig(env);
   const sent: string[] = [];
+  const keys: string[] = [];
   const bridge = new Bridge({
     cfg,
     store,
@@ -46,7 +47,7 @@ function setup(overrides: Partial<Env> = {}) {
       dial: async s => (log.push(`dial ${JSON.stringify(s)}`), 'out-call-1'),
     },
     capy: {
-      send: async text => (sent.push(text), '01SENTMESSAGEID00000000000A'),
+      send: async (text, clientKey) => (sent.push(text), keys.push(clientKey), '01SENTMESSAGEID00000000000A'),
       listAfter: async () => ({ items: reply.items, cursor: reply.cursor }),
       status: async () => reply.status,
     },
@@ -54,7 +55,7 @@ function setup(overrides: Partial<Env> = {}) {
   let n = 0;
   const evt = (type: string, payload: Record<string, unknown>) =>
     bridge.handleEvent({ data: { event_type: type, id: `e${++n}`, payload } });
-  return { bridge, store, log, sent, reply, clock, evt, cfg };
+  return { bridge, store, log, sent, keys, reply, clock, evt, cfg };
 }
 
 const answerInbound = async (s: ReturnType<typeof setup>) => {
@@ -108,6 +109,22 @@ describe('inbound calls', () => {
     await s.bridge.tick();
     expect(s.log).toContain('speak c1 You have two meetings.');
     expect(s.store.getCall('c1')?.waiting).toBeNull();
+  });
+
+  it('uses a Capy client key within the 64 character limit for real Telnyx call ids', async () => {
+    const id = 'v3:ie0odK7cm5dCtztjy7_cbP30iOz-ruWD1g8xOEegMCBlZhv9DwtKqg';
+    await s.evt('call.answered', { call_control_id: id, from: ALLOWED, client_state: encodeState({ k: 'in' }) });
+    for (const turn of ['first', 'second']) {
+      await s.evt('call.transcription', { call_control_id: id, transcription_data: { is_final: true, transcript: turn } });
+      s.clock.now += 2000;
+      await s.bridge.tick();
+      s.reply.items = [{ id: turn, source: 'assistant', text: 'ok' }];
+      s.clock.now += 2000;
+      await s.bridge.tick();
+    }
+    expect(s.keys).toHaveLength(2);
+    expect(new Set(s.keys).size).toBe(2);
+    for (const k of s.keys) expect(k.length).toBeLessThanOrEqual(64);
   });
 
   it('sends the follow-up turn without repeating the instructions', async () => {
