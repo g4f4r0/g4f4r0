@@ -128,6 +128,8 @@ export class Bridge {
     }
 
     if (type === 'call.hangup') {
+      const { from, to, client_state, call_control_id, call_leg_id, call_session_id, connection_id, ...summary } = p;
+      this.d.log(`call ended ${JSON.stringify(summary)}`);
       store.deleteCall(id);
       await this.rearm();
     }
