@@ -22,7 +22,7 @@ function setup(overrides: Partial<Env> = {}) {
   };
   const log: string[] = [];
   const sent: { text: string; key: string; delivery: string }[] = [];
-  const axo = { queue: [] as CapyMessage[], status: 'working', worked: true };
+  const axo = { queue: [] as CapyMessage[], status: 'working', worked: true, sendFails: 0, readFails: 0, live: [] as { callId: string; text: string }[], tool: false };
   const clock = { now: Date.UTC(2026, 10, 26, 18, 0) };
   const env = { HOLD_MUSIC_URL: 'https://x/hold.mp3', ALLOWED_CALLER: ALLOWED, TELNYX_NUMBER: '+13072070207', TELNYX_CONNECTION_ID: 'c', CAPY_THREAD_ID: 'jam_x', ...overrides } as Env;
   const cfg = parseConfig(env);
@@ -44,9 +44,15 @@ function setup(overrides: Partial<Env> = {}) {
       dial: async s => (log.push(`dial ${JSON.stringify(s)}`), 'out-1'),
     },
     capy: {
-      send: async (text, key, delivery = 'interrupt') => (sent.push({ text, key, delivery }), `01MSG${String(++m).padStart(21, '0')}`),
+      send: async (text, key, delivery = 'interrupt') => {
+        if (axo.sendFails > 0 && axo.sendFails--) throw new Error('capy down');
+        sent.push({ text, key, delivery });
+        return `01MSG${String(++m).padStart(21, '0')}`;
+      },
       readReplies: async afterId => {
-        const w = { items: axo.queue.splice(0), cursor: afterId, status: axo.status, worked: axo.worked };
+        if (axo.readFails > 0 && axo.readFails--) throw new Error('stream 503');
+        const w = { items: axo.queue.splice(0), live: axo.live.splice(0), cursor: afterId, status: axo.status, worked: axo.worked, toolStarted: axo.tool };
+        axo.tool = false;
         axo.worked = axo.status === 'working';
         return w;
       },
@@ -78,6 +84,7 @@ function setup(overrides: Partial<Env> = {}) {
   };
   const ring = async (id = 'c1') => {
     await evt('call.initiated', { call_control_id: id, direction: 'incoming', from: ALLOWED });
+    await tick();
   };
   const pickUp = async (id = 'c1') => {
     await ring(id);
@@ -147,6 +154,17 @@ describe('inbound: picking up', () => {
     expect(s.spoken()).toEqual(['Hey Johan, good to hear you.']);
   });
 
+  it('answers with the fallback right away if Capy is down, and briefs Axo with his first words', async () => {
+    s.axo.sendFails = 1;
+    await s.ring();
+    expect(s.log).toEqual(['answer c1 {"k":"in"}']);
+    await s.evt('call.answered', { call_control_id: 'c1', from: ALLOWED, client_state: encodeState({ k: 'in' }) });
+    expect(s.spoken()).toEqual(['Hey Johan.']);
+    await s.say('are you there');
+    expect(s.sent[0].text).toMatch(/^\[Channel: Phone call\] \[Event: Incoming call\] /);
+    expect(s.sent[0].text).toMatch(/\n\[Channel: Phone call\] \[From: Johan\] are you there$/);
+  });
+
   it('hangs up an answered leg whose caller is not the allowed number', async () => {
     await s.evt('call.answered', { call_control_id: 'c9', from: '+34600999888', client_state: encodeState({ k: 'in' }) });
     expect(s.log).toEqual(['hangup c9']);
@@ -161,6 +179,7 @@ describe('inbound: picking up', () => {
     const e = { data: { event_type: 'call.initiated', id: 'same', payload: { call_control_id: 'd1', direction: 'incoming', from: ALLOWED } } };
     await s.bridge.handleEvent(e);
     await s.bridge.handleEvent(e);
+    await s.tick();
     expect(s.sent).toHaveLength(1);
   });
 });
@@ -180,6 +199,53 @@ describe('inbound: conversation', () => {
     await s.tick();
     expect(s.spoken().slice(1)).toEqual(['You have two meetings.', 'The first is at ten.']);
     expect(s.store.getCall('c1')?.waiting).toBeNull();
+  });
+
+  it('speaks a line from the live stream before it commits, without repeating it', async () => {
+    await s.say('check my tasks');
+    s.axo.live.push({ callId: 'k1', text: 'Sure, checking now. And' });
+    await s.tick();
+    expect(s.spoken().at(-1)).toBe('Sure, checking now.');
+    s.axo.live.push({ callId: 'k1', text: 'Sure, checking now. And then some.' });
+    s.axo.queue.push({ id: 'm1', source: 'assistant', text: 'Sure, checking now. And then some.', callId: 'k1' });
+    await s.tick();
+    expect(s.spoken().slice(1)).toEqual(['Sure, checking now.', 'And then some.']);
+  });
+
+  it('starts hold music after a live [hold] line and says no filler', async () => {
+    await s.say('run the tests');
+    s.axo.live.push({ callId: 'k2', text: 'Running them now. [hold]' });
+    await s.tick();
+    await s.evt('call.speak.ended', { call_control_id: 'c1' });
+    s.axo.queue.push({ id: 'm2', source: 'assistant', text: 'Running them now. [hold]', callId: 'k2' });
+    await s.tick(7000);
+    expect(s.spoken().slice(1)).toEqual(['Running them now.']);
+    expect(s.log.filter(l => l.startsWith('music'))).toHaveLength(1);
+  });
+
+  it('says a filler the moment Axo starts a tool without saying anything', async () => {
+    await s.say('what is on my calendar');
+    s.axo.tool = true;
+    await s.tick(300);
+    expect(s.cfg.language.strings.fillers).toContain(s.spoken().at(-1));
+  });
+
+  it('still speaks a reply that lands just after he says something else', async () => {
+    await s.say('hi');
+    await s.hear('what can you help with');
+    s.reply('Hey! What can I do for you?', 'working');
+    await s.tick(1000);
+    await s.tick();
+    expect(s.spoken()).toContain('Hey! What can I do for you?');
+    expect(s.sent.at(-1)?.text).toBe('[Channel: Phone call] [From: Johan] what can you help with');
+  });
+
+  it('lets a single stop word cut Axo off', async () => {
+    await s.say('tell me everything');
+    s.reply('Here is a very long story about the deploy.', 'working');
+    await s.tick();
+    await s.hear('stop');
+    expect(s.log).toContain('stop c1');
   });
 
   it('keeps waiting while Axo is still working after its first message', async () => {
@@ -323,6 +389,17 @@ describe('inbound: conversation', () => {
     expect(s.log.at(-1)).toBe('stop c1');
     await s.tick(1000);
     expect(s.sent.at(-1)?.text).toBe('[Channel: Phone call] [From: Johan] actually skip it');
+  });
+
+  it('keeps the call going when reading replies fails for a moment', async () => {
+    await s.say('status');
+    s.axo.readFails = 2;
+    await s.tick();
+    await s.tick(300);
+    expect(s.log).not.toContain('hangup c1');
+    s.reply('All green.');
+    await s.tick(300);
+    expect(s.spoken().at(-1)).toBe('All green.');
   });
 
   it('keeps listening if a speak.ended event never arrives', async () => {

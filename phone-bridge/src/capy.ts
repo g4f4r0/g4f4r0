@@ -4,13 +4,21 @@ export interface CapyMessage {
   id: string;
   source: 'user' | 'assistant' | 'tool';
   text: string;
+  callId?: string;
+}
+
+export interface LiveReply {
+  callId: string;
+  text: string;
 }
 
 export interface ReplyWindow {
   items: CapyMessage[];
+  live: LiveReply[];
   cursor: string;
   status: string | null;
   worked: boolean;
+  toolStarted: boolean;
 }
 
 export interface CapyApi {
@@ -19,6 +27,7 @@ export interface CapyApi {
 }
 
 const BATCH_MS = 150;
+const SEND_TIMEOUT_MS = 3000;
 
 export function parseFrames(buffer: string): { frames: { id?: string; event: string; data: string }[]; rest: string } {
   const parts = buffer.split(/\r?\n\r?\n/);
@@ -45,15 +54,22 @@ export function createCapy(apiKey: string, cfg: Config, fetcher: typeof fetch = 
 
   return {
     send: async (text, clientKey, delivery = 'interrupt') => {
-      const res = await fetcher(url('/message'), { method: 'POST', headers, body: JSON.stringify({ text, delivery, clientKey }) });
+      const body = JSON.stringify({ text, delivery, clientKey });
+      const post = () => fetcher(url('/message'), { method: 'POST', headers, body, signal: AbortSignal.timeout(SEND_TIMEOUT_MS) });
+      let res = await post().catch(() => null);
+      if (!res || res.status >= 500 || res.status === 429) res = await post();
       if (!res.ok) throw new Error(`capy send failed with ${res.status}: ${(await res.text()).slice(0, 300)}`);
       return ((await res.json()) as { id: string }).id;
     },
 
     readReplies: async (afterId, windowMs) => {
-      const result: ReplyWindow = { items: [], cursor: afterId, status: null, worked: false };
+      const result: ReplyWindow = { items: [], live: [], cursor: afterId, status: null, worked: false, toolStarted: false };
       const abort = new AbortController();
       let timer = setTimeout(() => abort.abort(), windowMs);
+      const soon = () => {
+        clearTimeout(timer);
+        timer = setTimeout(() => abort.abort(), BATCH_MS);
+      };
       try {
         const res = await fetcher(url(`/stream?after=${encodeURIComponent(afterId)}`), {
           headers: { ...headers, accept: 'text/event-stream' },
@@ -72,13 +88,24 @@ export function createCapy(apiKey: string, cfg: Config, fetcher: typeof fetch = 
             if (f.event === 'status') {
               result.status = JSON.parse(f.data).status ?? result.status;
               if (result.status === 'working') result.worked = true;
+              else if (result.items.length || result.live.length) return result;
+            }
+            if (f.event === 'assistant') {
+              const frag = JSON.parse(f.data) as LiveReply;
+              const known = result.live.find(l => l.callId === frag.callId);
+              if (known) known.text += frag.text;
+              else result.live.push({ callId: frag.callId, text: frag.text });
+              soon();
+            }
+            if (f.event === 'tool_call') {
+              result.toolStarted = true;
+              soon();
             }
             if (f.event === 'transcript') {
               const m = JSON.parse(f.data) as CapyMessage;
               if (m.source === 'assistant' && m.text?.trim()) {
                 result.items.push(m);
-                clearTimeout(timer);
-                timer = setTimeout(() => abort.abort(), BATCH_MS);
+                soon();
               }
             }
             if (f.event === 'done' || f.event === 'error') return result;
