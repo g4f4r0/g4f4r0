@@ -3,6 +3,9 @@ main = "src/index.ts"
 compatibility_date = "2026-11-01"
 workers_dev = true
 
+[assets]
+directory = "./public"
+
 [observability]
 enabled = true
 
@@ -18,8 +21,7 @@ new_sqlite_classes = ["PhoneBridge"]
 LANGUAGE = "en"
 MAX_CALL_SECONDS = "600"
 MAX_OUTBOUND_PER_DAY = "10"
-HOLD_AFTER_SECONDS = "8"
-REPLY_TIMEOUT_SECONDS = "180"
+HOLD_MUSIC_URL = "https://g4f4r0-axo.hellogafaro.workers.dev/hold.mp3"
 CAPY_THREAD_ID = "jam_01M7ZVYPQRQXF852J7VSRKMTAQ"
 TIMEZONE = "Europe/Madrid"
 TELNYX_CONNECTION_ID = "3101835432166425895"

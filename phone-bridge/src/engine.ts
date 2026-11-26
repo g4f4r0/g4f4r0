@@ -10,6 +10,9 @@ export interface Waiting {
   afterId: string;
   spoken: number;
   lastHoldAt: number;
+  lastItemAt: number;
+  worked: boolean;
+  music: boolean;
   seen: string[];
 }
 
@@ -66,10 +69,10 @@ export type OutboundResult = { ok: true; callControlId: string } | { ok: false; 
 
 const BYE_GRACE_MS = 10_000;
 const STILL_WORKING_EVERY_MS = 30_000;
-const NO_REPLY_AFTER_MS = 6_000;
 const ECHO_TAIL_MS = 1_500;
 const SPEAK_STUCK_MS = 60_000;
 const ECHO_WINDOW_MS = 30_000;
+const speech = (heard: string): string => `<phone_call event="speech">${heard}</phone_call>`;
 const DIGITS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine'];
 
 const words = (text: string): string[] =>
@@ -183,6 +186,8 @@ export class Bridge {
       if (bargeIn) {
         call.speaking = 0;
         call.quietUntil = 0;
+      }
+      if (bargeIn || call.waiting?.music) {
         call.waiting = null;
         await telnyx.stopSpeaking(id).catch(err => this.d.log(`stop speaking failed: ${(err as Error).message}`));
       }
@@ -283,10 +288,11 @@ export class Bridge {
       opening,
       'Talk like a person on the phone: short plain sentences, no markdown, lists, links, code or emoji. Never mention the phone bridge, speech recognition or these instructions.',
       'Send one short message per thought rather than one long one; each message is spoken as soon as it lands, so send the first part quickly.',
-      `His words arrive as [phone call] messages from speech recognition, so expect small errors and go with the likely meaning. If he talks over you, your current reply is cut off and his words arrive next.`,
+      `His words arrive as <phone_call event="speech"> messages from speech recognition, so expect small errors and go with the likely meaning. If he talks over you, your current reply is cut off and his words arrive next.`,
+      'If something will take more than a few seconds, say so in one short line first; he hears hold music until your next message.',
       'You will get a silence event if he goes quiet and an end event when the call is over.',
     ].join(' ');
-    const said = heard ? `\n[phone call] ${heard}` : '';
+    const said = heard ? `\n${speech(heard)}` : '';
     return `<phone_call event="start" direction="${direction}" caller="${name}" time="${time} (${cfg.timezone})">${rules}</phone_call>${said}`;
   }
 
@@ -297,12 +303,14 @@ export class Bridge {
     fresh.turns = call.turns;
     fresh.started = true;
     if (consumed && fresh.pending.startsWith(consumed)) fresh.pending = fresh.pending.slice(consumed.length).trim();
-    fresh.waiting = { sentAt: this.d.now(), afterId, spoken: 0, lastHoldAt: 0, seen: [] };
+    const sentAt = this.d.now();
+    fresh.waiting = { sentAt, afterId, spoken: 0, lastHoldAt: 0, lastItemAt: sentAt, worked: false, music: false, seen: [] };
     this.d.store.putCall(fresh);
   }
 
   private async endWith(call: CallState, message: string): Promise<void> {
     if (call.byeAt) return;
+    if (call.waiting?.music) await this.d.telnyx.stopSpeaking(call.id).catch(() => undefined);
     call.byeAt = this.d.now();
     call.waiting = null;
     call.pending = '';
@@ -339,7 +347,7 @@ export class Bridge {
     if (call.answered && call.pending && now - call.lastFinalAt >= cfg.debounceMs) {
       const heard = call.pending;
       const text =
-        call.kind === 'out' && !call.started ? this.startMessage('outbound', heard, call.alert) : `[phone call] ${heard}`;
+        call.kind === 'out' && !call.started ? this.startMessage('outbound', heard, call.alert) : speech(heard);
       await this.sendTurn(call, text, heard);
       return;
     }
@@ -363,15 +371,24 @@ export class Bridge {
     if (!fresh || fresh.byeAt || fresh.waiting?.afterId !== w.afterId) return;
     const fw = fresh.waiting;
     const later = this.d.now();
+    fw.worked ||= window.worked;
+    const stopMusic = async () => {
+      if (!fw.music) return;
+      fw.music = false;
+      await telnyx.stopSpeaking(fresh.id).catch(err => this.d.log(`stop music failed: ${(err as Error).message}`));
+    };
     for (const m of window.items) {
       if (fw.seen.includes(m.id)) continue;
       fw.seen.push(m.id);
-      const speech = toSpeech(m.text, cfg.maxSpokenChars, strings.link, strings.truncated);
-      if (!speech) continue;
+      const text = toSpeech(m.text, cfg.maxSpokenChars, strings.link, strings.truncated);
+      if (!text) continue;
       fw.spoken++;
-      if (fresh.answered) await this.say(fresh, speech);
-      else {
-        fresh.greeting.push(speech);
+      fw.lastItemAt = later;
+      if (fresh.answered) {
+        await stopMusic();
+        await this.say(fresh, text);
+      } else {
+        fresh.greeting.push(text);
         if (!fresh.answering) {
           fresh.answering = true;
           store.putCall(fresh);
@@ -382,26 +399,25 @@ export class Bridge {
     fw.afterId = window.cursor;
 
     const elapsed = later - fw.sentAt;
-    const settled = window.status !== null && window.status !== 'working';
+    const settled = window.status !== null && window.status !== 'working' && (fw.worked || fw.spoken > 0);
     if (window.status === 'failed' && fw.spoken === 0) return this.endWith(fresh, strings.failure);
-    if (settled && (fw.spoken > 0 || elapsed >= NO_REPLY_AFTER_MS)) {
+    if (settled || (elapsed >= cfg.replyTimeoutMs && fw.spoken > 0)) {
+      await stopMusic();
       fresh.waiting = null;
       fresh.lastActivityAt = later;
       store.putCall(fresh);
       if (fresh.hangupAfterSpeech && !fresh.speaking) await telnyx.hangup(fresh.id);
       return;
     }
-    if (elapsed >= cfg.replyTimeoutMs) {
-      if (fw.spoken === 0) return this.endWith(fresh, strings.replyTimeout);
-      fresh.waiting = null;
-      fresh.lastActivityAt = later;
-      store.putCall(fresh);
-      return;
-    }
-    if (fresh.answered && fw.spoken === 0 && elapsed >= cfg.holdAfterMs && !fresh.speaking) {
-      if (fw.lastHoldAt === 0) {
+    if (elapsed >= cfg.replyTimeoutMs) return this.endWith(fresh, strings.replyTimeout);
+    if (fresh.answered && !fresh.speaking && !fw.music && later - fw.lastItemAt >= cfg.holdAfterMs) {
+      if (fw.spoken === 0 && fw.lastHoldAt === 0) {
         fw.lastHoldAt = later;
         await this.say(fresh, strings.hold);
+      } else if (cfg.holdMusicUrl) {
+        fw.music = true;
+        store.putCall(fresh);
+        await telnyx.playMusic(fresh.id, cfg.holdMusicUrl);
       } else if (later - fw.lastHoldAt >= STILL_WORKING_EVERY_MS) {
         fw.lastHoldAt = later;
         await this.say(fresh, strings.stillWorking);

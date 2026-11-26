@@ -14,6 +14,7 @@ export interface Env {
   MAX_OUTBOUND_PER_DAY?: string;
   HOLD_AFTER_SECONDS?: string;
   REPLY_TIMEOUT_SECONDS?: string;
+  HOLD_MUSIC_URL?: string;
   MAX_SPOKEN_CHARS?: string;
   IDLE_SECONDS?: string;
   GREETING_TIMEOUT_SECONDS?: string;
@@ -96,6 +97,7 @@ export interface Config {
   maxOutboundPerDay: number;
   holdAfterMs: number;
   replyTimeoutMs: number;
+  holdMusicUrl: string;
   maxSpokenChars: number;
   idleMs: number;
   greetingTimeoutMs: number;
@@ -131,10 +133,11 @@ export function parseConfig(env: Env): Config {
     maxCallMs: int(env.MAX_CALL_SECONDS, 600, 'MAX_CALL_SECONDS') * 1000,
     maxOutboundPerDay: int(env.MAX_OUTBOUND_PER_DAY, 10, 'MAX_OUTBOUND_PER_DAY'),
     holdAfterMs: int(env.HOLD_AFTER_SECONDS, 6, 'HOLD_AFTER_SECONDS') * 1000,
-    replyTimeoutMs: int(env.REPLY_TIMEOUT_SECONDS, 180, 'REPLY_TIMEOUT_SECONDS') * 1000,
+    replyTimeoutMs: int(env.REPLY_TIMEOUT_SECONDS, 300, 'REPLY_TIMEOUT_SECONDS') * 1000,
+    holdMusicUrl: env.HOLD_MUSIC_URL ?? '',
     maxSpokenChars: int(env.MAX_SPOKEN_CHARS, 700, 'MAX_SPOKEN_CHARS'),
     idleMs: int(env.IDLE_SECONDS, 20, 'IDLE_SECONDS') * 1000,
-    greetingTimeoutMs: int(env.GREETING_TIMEOUT_SECONDS, 8, 'GREETING_TIMEOUT_SECONDS') * 1000,
+    greetingTimeoutMs: int(env.GREETING_TIMEOUT_SECONDS, 20, 'GREETING_TIMEOUT_SECONDS') * 1000,
     callerName: env.CALLER_NAME ?? 'Johan',
     keyterms: (env.KEYTERMS ?? 'Axo,Capy,Johan,g4f4r0,Telnyx,Cloudflare,GitHub')
       .split(',')

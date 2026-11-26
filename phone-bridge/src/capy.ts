@@ -10,6 +10,7 @@ export interface ReplyWindow {
   items: CapyMessage[];
   cursor: string;
   status: string | null;
+  worked: boolean;
 }
 
 export interface CapyApi {
@@ -50,7 +51,7 @@ export function createCapy(apiKey: string, cfg: Config, fetcher: typeof fetch = 
     },
 
     readReplies: async (afterId, windowMs) => {
-      const result: ReplyWindow = { items: [], cursor: afterId, status: null };
+      const result: ReplyWindow = { items: [], cursor: afterId, status: null, worked: false };
       const abort = new AbortController();
       let timer = setTimeout(() => abort.abort(), windowMs);
       try {
@@ -68,7 +69,10 @@ export function createCapy(apiKey: string, cfg: Config, fetcher: typeof fetch = 
           buffer = parsed.rest;
           for (const f of parsed.frames) {
             if (f.id) result.cursor = f.id;
-            if (f.event === 'status') result.status = JSON.parse(f.data).status ?? result.status;
+            if (f.event === 'status') {
+              result.status = JSON.parse(f.data).status ?? result.status;
+              if (result.status === 'working') result.worked = true;
+            }
             if (f.event === 'transcript') {
               const m = JSON.parse(f.data) as CapyMessage;
               if (m.source === 'assistant' && m.text?.trim()) {

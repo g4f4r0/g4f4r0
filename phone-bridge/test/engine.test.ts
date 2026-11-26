@@ -22,9 +22,9 @@ function setup(overrides: Partial<Env> = {}) {
   };
   const log: string[] = [];
   const sent: { text: string; key: string; delivery: string }[] = [];
-  const axo = { queue: [] as CapyMessage[], status: 'working' };
+  const axo = { queue: [] as CapyMessage[], status: 'working', worked: true };
   const clock = { now: Date.UTC(2026, 10, 26, 18, 0) };
-  const env = { ALLOWED_CALLER: ALLOWED, TELNYX_NUMBER: '+13072070207', TELNYX_CONNECTION_ID: 'c', CAPY_THREAD_ID: 'jam_x', ...overrides } as Env;
+  const env = { HOLD_MUSIC_URL: 'https://x/hold.mp3', ALLOWED_CALLER: ALLOWED, TELNYX_NUMBER: '+13072070207', TELNYX_CONNECTION_ID: 'c', CAPY_THREAD_ID: 'jam_x', ...overrides } as Env;
   const cfg = parseConfig(env);
   let m = 0;
   const bridge = new Bridge({
@@ -38,13 +38,18 @@ function setup(overrides: Partial<Env> = {}) {
       reject: async id => void log.push(`reject ${id}`),
       speak: async (id, t, s) => void log.push(`speak ${id} ${t}${s ? ' ' + JSON.stringify(s) : ''}`),
       stopSpeaking: async id => void log.push(`stop ${id}`),
+      playMusic: async (id, url) => void log.push(`music ${id} ${url}`),
       startTranscription: async id => void log.push(`stt ${id}`),
       hangup: async id => void log.push(`hangup ${id}`),
       dial: async s => (log.push(`dial ${JSON.stringify(s)}`), 'out-1'),
     },
     capy: {
       send: async (text, key, delivery = 'interrupt') => (sent.push({ text, key, delivery }), `01MSG${String(++m).padStart(21, '0')}`),
-      readReplies: async afterId => ({ items: axo.queue.splice(0), cursor: afterId, status: axo.status }),
+      readReplies: async afterId => {
+        const w = { items: axo.queue.splice(0), cursor: afterId, status: axo.status, worked: axo.worked };
+        axo.worked = axo.status === 'working';
+        return w;
+      },
     },
   });
   let n = 0;
@@ -58,7 +63,7 @@ function setup(overrides: Partial<Env> = {}) {
     axo.queue.push({ id: `a${++m}`, source: 'assistant', text });
     axo.status = status;
   };
-  const working = () => void (axo.status = 'working');
+  const working = () => void ((axo.status = 'working'), (axo.worked = true));
   const spoke = async (id = 'c1') => {
     await evt('call.speak.ended', { call_control_id: id });
     clock.now += 2000;
@@ -115,7 +120,7 @@ describe('inbound: picking up', () => {
 
   it('answers with a short greeting if Axo is slow, then speaks Axo when it arrives', async () => {
     await s.ring();
-    await s.tick(7000);
+    await s.tick(19_000);
     expect(s.log).toEqual([]);
     await s.tick(1000);
     expect(s.log).toEqual(['answer c1 {"k":"in"}']);
@@ -124,6 +129,22 @@ describe('inbound: picking up', () => {
     s.reply('Hey Johan!');
     await s.tick(1000);
     expect(s.spoken()).toEqual(['Hey Johan.', 'Hey Johan!']);
+  });
+
+  it('keeps ringing while Axo is still waking up instead of giving up on the greeting', async () => {
+    s.axo.status = 'waiting';
+    s.axo.worked = false;
+    await s.ring();
+    for (let i = 0; i < 4; i++) await s.tick(2500);
+    expect(s.log).toEqual([]);
+    s.axo.status = 'working';
+    s.axo.worked = true;
+    await s.tick(500);
+    s.reply('Hey Johan, good to hear you.');
+    await s.tick(500);
+    expect(s.log).toEqual(['answer c1 {"k":"in"}']);
+    await s.evt('call.answered', { call_control_id: 'c1', from: ALLOWED, client_state: encodeState({ k: 'in' }) });
+    expect(s.spoken()).toEqual(['Hey Johan, good to hear you.']);
   });
 
   it('hangs up an answered leg whose caller is not the allowed number', async () => {
@@ -153,7 +174,7 @@ describe('inbound: conversation', () => {
 
   it('sends his words as a short tagged turn and speaks every reply message in order', async () => {
     await s.say('what is on my calendar');
-    expect(s.sent[1]).toMatchObject({ text: '[phone call] what is on my calendar', delivery: 'interrupt' });
+    expect(s.sent[1]).toMatchObject({ text: '<phone_call event="speech">what is on my calendar</phone_call>', delivery: 'interrupt' });
     s.reply('You have two meetings.', 'working');
     s.reply('The first is at **ten**.', 'idle');
     await s.tick();
@@ -178,14 +199,14 @@ describe('inbound: conversation', () => {
     s.clock.now += 300;
     await s.hear('calendar');
     await s.tick(1000);
-    expect(s.sent[1].text).toBe('[phone call] check my calendar');
+    expect(s.sent[1].text).toBe('<phone_call event="speech">check my calendar</phone_call>');
   });
 
   it('sends a new utterance right away even while Axo is still thinking', async () => {
     await s.say('first question');
     await s.hear('actually never mind');
     await s.tick(1000);
-    expect(s.sent.map(x => x.text).slice(1)).toEqual(['[phone call] first question', '[phone call] actually never mind']);
+    expect(s.sent.map(x => x.text).slice(1)).toEqual(['<phone_call event="speech">first question</phone_call>', '<phone_call event="speech">actually never mind</phone_call>']);
   });
 
   it('stops speaking and passes his words on when he talks over Axo', async () => {
@@ -195,7 +216,7 @@ describe('inbound: conversation', () => {
     await s.hear('stop stop, just the summary');
     expect(s.log).toContain('stop c1');
     await s.tick(1000);
-    expect(s.sent.at(-1)).toMatchObject({ text: '[phone call] stop stop, just the summary', delivery: 'interrupt' });
+    expect(s.sent.at(-1)).toMatchObject({ text: '<phone_call event="speech">stop stop, just the summary</phone_call>', delivery: 'interrupt' });
   });
 
   it('drops the rest of the cut-off reply and keeps hearing him after a barge-in', async () => {
@@ -210,7 +231,7 @@ describe('inbound: conversation', () => {
     await s.hear('what broke');
     await s.tick(1000);
     expect(s.spoken()).not.toContain('And then the migration ran for hours.');
-    expect(s.sent.at(-1)?.text).toBe('[phone call] wait a second what broke');
+    expect(s.sent.at(-1)?.text).toBe('<phone_call event="speech">wait a second what broke</phone_call>');
   });
 
   it('ignores its own voice while speaking and right after', async () => {
@@ -234,29 +255,63 @@ describe('inbound: conversation', () => {
     await s.tick(1000);
     expect(s.sent).toHaveLength(2);
     await s.say('thanks, retry the deploy');
-    expect(s.sent.at(-1)?.text).toBe('[phone call] thanks, retry the deploy');
+    expect(s.sent.at(-1)?.text).toBe('<phone_call event="speech">thanks, retry the deploy</phone_call>');
+  });
+
+  it('plays hold music while Axo works and cuts it for the next message', async () => {
+    await s.say('run the full test suite');
+    s.reply('On it, give me a minute.', 'working');
+    await s.tick();
+    await s.spoke();
+    await s.tick(3000);
+    expect(s.log.filter(l => l.startsWith('music'))).toEqual([]);
+    await s.tick(1000);
+    expect(s.log.at(-1)).toBe('music c1 https://x/hold.mp3');
+    await s.tick(30_000);
+    expect(s.log.filter(l => l.startsWith('music'))).toHaveLength(1);
+    s.reply('All 52 tests pass.');
+    await s.tick();
+    expect(s.log.slice(-2)).toEqual(['stop c1', 'speak c1 All 52 tests pass.']);
+  });
+
+  it('says one moment before the music when Axo has said nothing yet', async () => {
+    await s.say('long question');
+    await s.tick(7000);
+    expect(s.spoken().at(-1)).toBe('One moment.');
+    await s.spoke();
+    await s.tick();
+    expect(s.log.at(-1)).toBe('music c1 https://x/hold.mp3');
+  });
+
+  it('stops the music when he talks during hold', async () => {
+    await s.say('long question');
+    await s.tick(7000);
+    await s.spoke();
+    await s.tick();
+    await s.hear('actually skip it');
+    expect(s.log.at(-1)).toBe('stop c1');
+    await s.tick(1000);
+    expect(s.sent.at(-1)?.text).toBe('<phone_call event="speech">actually skip it</phone_call>');
   });
 
   it('keeps listening if a speak.ended event never arrives', async () => {
     s.clock.now += 61_000;
     await s.hear('are you there');
     await s.tick(1000);
-    expect(s.sent.at(-1)?.text).toBe('[phone call] are you there');
+    expect(s.sent.at(-1)?.text).toBe('<phone_call event="speech">are you there</phone_call>');
   });
 
   it('stops waiting quietly when Axo ends its turn without a message', async () => {
     await s.say('thanks');
     s.axo.status = 'idle';
-    await s.tick(3000);
-    expect(s.store.getCall('c1')?.waiting).not.toBeNull();
-    await s.tick(4000);
+    await s.tick(1000);
     expect(s.store.getCall('c1')?.waiting).toBeNull();
     expect(s.spoken()).not.toContain('Something went wrong on my side. Please try again later. Goodbye.');
   });
 
   it('gives up after the reply timeout and says so', async () => {
     await s.say('long question');
-    await s.tick(181_000);
+    await s.tick(s.cfg.replyTimeoutMs + 1000);
     expect(s.spoken().some(t => t.includes('has not answered yet'))).toBe(true);
   });
 
@@ -342,7 +397,7 @@ describe('config', () => {
     const s = setup({ LANGUAGE: 'es' });
     await s.ring();
     expect(s.sent[0].text).toContain('spoken to him in Spanish');
-    await s.tick(8000);
+    await s.tick(20_000);
     await s.evt('call.answered', { call_control_id: 'c1', from: ALLOWED, client_state: encodeState({ k: 'in' }) });
     expect(s.spoken()).toEqual(['Hola Johan.']);
   });
@@ -366,7 +421,7 @@ describe('outbound calls', () => {
     await s.say('retry it', 'o1');
     expect(s.sent[0].text).toMatch(/^<phone_call event="start" direction="outbound"/);
     expect(s.sent[0].text).toContain('You phoned Johan to tell him: "Build failed"');
-    expect(s.sent[0].text).toMatch(/\n\[phone call\] retry it$/);
+    expect(s.sent[0].text).toMatch(/\n<phone_call event="speech">retry it<\/phone_call>$/);
   });
 
   it('enforces the daily cap and never dials past it', async () => {
