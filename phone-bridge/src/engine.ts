@@ -1,5 +1,5 @@
 import type { Config } from './config';
-import type { CapyApi, ModelSelection } from './capy';
+import type { CapyApi } from './capy';
 import type { TelnyxApi } from './telnyx';
 import { decodeState } from './telnyx';
 import { dayKey, isAllowedCaller, reserveOutbound, type CountStore } from './guards';
@@ -39,8 +39,7 @@ export interface CallState {
   recent: { text: string; at: number }[];
   lastActivityAt: number;
   idlePrompts: number;
-  model: { call: ModelSelection; restore: ModelSelection } | null;
-  modelChecked: boolean;
+  threadId: string | null;
   endOfTurn: boolean;
 }
 
@@ -50,6 +49,9 @@ export interface Store extends CountStore {
   deleteCall(id: string): void;
   listCalls(): CallState[];
   markSeen(eventId: string, now: number): boolean;
+  archiveLater(threadId: string, at: number): void;
+  dueArchives(now: number): string[];
+  nextArchiveAt(): number | null;
 }
 
 export interface Deps {
@@ -75,6 +77,7 @@ export interface TelnyxEvent {
 export type OutboundResult = { ok: true; callControlId: string } | { ok: false; reason: 'cap' | 'telnyx' };
 
 const BYE_GRACE_MS = 10_000;
+const ARCHIVE_AFTER_MS = 180_000;
 const SPEAK_STUCK_MS = 60_000;
 const STOP_WORDS = new Set(['stop', 'wait', 'no', 'nope', 'sorry', 'hey', 'actually', 'hold']);
 const SENTENCE_END = /[.!?…](?=\s|$)/g;
@@ -256,6 +259,8 @@ export class Bridge {
   }
 
   async tick(): Promise<void> {
+    for (const threadId of this.d.store.dueArchives(this.d.now()))
+      await this.d.capy.archive(threadId).catch(err => this.d.log(`archiving the call thread failed: ${(err as Error).message}`));
     for (const call of this.d.store.listCalls()) {
       try {
         await this.tickCall(call);
@@ -290,8 +295,7 @@ export class Bridge {
       recent: [],
       lastActivityAt: now,
       idlePrompts: 0,
-      model: null,
-      modelChecked: false,
+      threadId: null,
       endOfTurn: false,
     };
   }
@@ -313,7 +317,7 @@ export class Bridge {
         ? `${name} is calling you. Your first message is spoken the moment he picks up, so greet him by name in a few casual words.`
         : `You phoned ${name} with the alert below. He has heard it and just answered.`;
     const rules = [
-      `Live phone call: every message you send is spoken to ${name} until it ends.`,
+      `You are Axo, ${name}'s assistant, on a live phone call: every message you send is spoken to him until it ends. You are a crew thread of Captain Axo; read its drive notes or ask it when you need its context.`,
       opening,
       'Talk like a friend on the phone: one or two short sentences, plain words, no markdown or lists. Never restate what he said, recap or over-explain; answer and stop. He will ask if he wants more.',
       'Speed beats everything: reply instantly with no deliberation, and use no tools unless he asks for real work. Before any lookup, first send a few-word ack like "Sure, checking." Keep him posted during long work.',
@@ -330,9 +334,10 @@ export class Bridge {
   private async finish(call: CallState, byUs: boolean): Promise<void> {
     const { cfg, store } = this.d;
     store.deleteCall(call.id);
-    if (call.kind === 'out' && !call.started) return;
-    const text = `[Channel: Phone call] [Event: Call ended] [Duration: ${formatDuration(this.d.now() - call.startedAt)}] [Ended by: ${byUs ? 'Axo' : cfg.callerName}] The call is over. Nothing you send now is spoken. Reply only if there is follow-up work.`;
-    await this.d.capy.send(text, `phone-${call.startedAt}-end`, 'queue', call.model?.restore).catch(err => this.d.log(`end message failed: ${(err as Error).message}`));
+    if (!call.threadId) return;
+    const text = `[Channel: Phone call] [Event: Call ended] [Duration: ${formatDuration(this.d.now() - call.startedAt)}] [Ended by: ${byUs ? 'Axo' : cfg.callerName}] The call is over and nothing you send is spoken. Report to your Captain now: a two or three line summary of the call and anything still to do.`;
+    await this.d.capy.send(call.threadId, text, `phone-${call.startedAt}-end`, 'queue').catch(err => this.d.log(`end message failed: ${(err as Error).message}`));
+    store.archiveLater(call.threadId, this.d.now() + ARCHIVE_AFTER_MS);
   }
 
   private sendAt(call: CallState): number {
@@ -349,45 +354,20 @@ export class Bridge {
     this.d.store.putCall(call);
   }
 
-  private async callModels(): Promise<{ call: ModelSelection; restore: ModelSelection } | null> {
-    const { cfg, capy } = this.d;
-    if (cfg.axoModel && cfg.callModel && cfg.callReasoning && !cfg.callFast)
-      return {
-        call: { modelId: cfg.callModel, reasoningMode: cfg.callReasoning },
-        restore: { modelId: cfg.axoModel, reasoningMode: cfg.axoReasoning },
-      };
-    try {
-      const models = await capy.readModels();
-      const axoModel = cfg.axoModel ?? models.current;
-      if (!axoModel || !cfg.callReasoning) return null;
-      const modelId = cfg.callModel ?? axoModel;
-      const fast = cfg.callFast && models.fast.includes(modelId);
-      return {
-        call: { modelId, reasoningMode: cfg.callReasoning, ...(fast ? { modes: { fast: true } } : {}) },
-        restore: { modelId: axoModel, reasoningMode: cfg.axoReasoning },
-      };
-    } catch (err) {
-      this.d.log(`reading Axo's model failed: ${(err as Error).message}`);
-      return null;
-    }
-  }
-
   private async sendTurn(call: CallState, text: string, consumed = ''): Promise<void> {
     const { cfg, capy } = this.d;
     call.turns++;
     if (!call.started) text = this.startMessage(call.kind === 'in' ? 'inbound' : 'outbound', text, call.alert);
-    if (!call.modelChecked && cfg.callReasoning) {
-      call.model = await this.callModels();
-      call.modelChecked = true;
-    }
     const sendStart = this.d.now();
-    const sentId = await capy.send(text, `phone-${call.startedAt}-${call.turns}`, 'interrupt', call.model?.call);
+    const key = `phone-${call.startedAt}-${call.turns}`;
+    let sentId = '';
+    if (call.threadId) sentId = await capy.send(call.threadId, text, key);
+    else call.threadId = await capy.createThread(text, key, `Phone call ${call.kind === 'in' ? 'from' : 'to'} ${cfg.callerName}`);
     this.d.log(`turn ${call.turns} sent in ${this.d.now() - sendStart} ms, ${sendStart - call.lastFinalAt} ms after his last words`);
     const fresh = this.d.store.getCall(call.id) ?? call;
     fresh.turns = call.turns;
     fresh.started = true;
-    fresh.model = call.model;
-    fresh.modelChecked = call.modelChecked;
+    fresh.threadId = call.threadId;
     if (consumed && fresh.pending.startsWith(consumed)) fresh.pending = fresh.pending.slice(consumed.length).trim();
     const sentAt = this.d.now();
     const prev = fresh.waiting;
@@ -478,7 +458,7 @@ export class Bridge {
     if (call.pending) return;
     let window;
     try {
-      window = await capy.readReplies(w.afterId, cfg.streamWindowMs, this.d.readSignal?.());
+      window = await capy.readReplies(call.threadId ?? '', w.afterId, cfg.streamWindowMs, this.d.readSignal?.());
     } catch (err) {
       this.d.log(`reading replies failed, retrying: ${(err as Error).message}`);
       return;
@@ -588,6 +568,8 @@ export class Bridge {
     const at = (t: number) => {
       next = next === null ? t : Math.min(next, t);
     };
+    const archiveAt = store.nextArchiveAt();
+    if (archiveAt !== null) at(archiveAt);
     for (const c of store.listCalls()) {
       at(c.byeAt ? c.byeAt + BYE_GRACE_MS : c.deadline);
       if (c.byeAt) continue;

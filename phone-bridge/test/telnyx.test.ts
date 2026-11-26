@@ -9,7 +9,7 @@ function capture(env: Partial<Env> = {}, failures = 0) {
     if (failures > 0 && failures--) return new Response('{"errors":[]}', { status: 422 });
     return new Response('{"data":{"result":"ok"}}');
   }) as unknown as typeof fetch;
-  const cfg = parseConfig({ CALLER_PHONE_NUMBER: '+1', TELNYX_PHONE_NUMBER: '+2', TELNYX_CONNECTION_ID: 'c', CAPY_THREAD_ID: 't', ...env } as Env);
+  const cfg = parseConfig({ CALLER_PHONE_NUMBER: '+1', TELNYX_PHONE_NUMBER: '+2', TELNYX_CONNECTION_ID: 'c', CAPY_PROJECT_ID: 'p', CAPY_CAPTAIN_ID: 't', ...env } as Env);
   return { telnyx: createTelnyx('key', cfg, fetcher), requests };
 }
 

@@ -18,7 +18,8 @@ export class PhoneBridge extends DurableObject<Env> {
     this.sql.exec(
       'CREATE TABLE IF NOT EXISTS outbound_counts (day TEXT PRIMARY KEY, n INTEGER NOT NULL);' +
         'CREATE TABLE IF NOT EXISTS calls (id TEXT PRIMARY KEY, state TEXT NOT NULL);' +
-        'CREATE TABLE IF NOT EXISTS seen (id TEXT PRIMARY KEY, at INTEGER NOT NULL);',
+        'CREATE TABLE IF NOT EXISTS seen (id TEXT PRIMARY KEY, at INTEGER NOT NULL);' +
+        'CREATE TABLE IF NOT EXISTS archives (thread_id TEXT PRIMARY KEY, at INTEGER NOT NULL);',
     );
   }
 
@@ -41,6 +42,17 @@ export class PhoneBridge extends DurableObject<Env> {
       deleteCall: id => void (this.live.delete(id), sql.exec('DELETE FROM calls WHERE id = ?', id)),
       listCalls: () =>
         sql.exec('SELECT id FROM calls').toArray().map(r => this.store().getCall(r.id as string) as CallState),
+      archiveLater: (threadId, at) =>
+        void sql.exec('INSERT OR REPLACE INTO archives (thread_id, at) VALUES (?, ?)', threadId, at),
+      dueArchives: now => {
+        const due = sql.exec('SELECT thread_id FROM archives WHERE at <= ?', now).toArray().map(r => r.thread_id as string);
+        sql.exec('DELETE FROM archives WHERE at <= ?', now);
+        return due;
+      },
+      nextArchiveAt: () => {
+        const at = sql.exec('SELECT MIN(at) AS at FROM archives').toArray()[0]?.at;
+        return at === null || at === undefined ? null : Number(at);
+      },
       markSeen: (id, now) => {
         sql.exec('DELETE FROM seen WHERE at < ?', now - 3_600_000);
         if (sql.exec('SELECT 1 FROM seen WHERE id = ?', id).toArray().length) return false;

@@ -29,12 +29,10 @@ export interface Env {
   TELNYX_CONNECTION_ID: string;
   TELNYX_PHONE_NUMBER: string;
   CAPY_API_KEY: string;
-  CAPY_THREAD_ID: string;
+  CAPY_PROJECT_ID: string;
+  CAPY_CAPTAIN_ID: string;
   CAPY_CALL_MODEL_ID?: string;
   CAPY_CALL_REASONING_MODE?: string;
-  CAPY_CALL_FAST_MODE?: string;
-  CAPY_DEFAULT_MODEL_ID?: string;
-  CAPY_DEFAULT_REASONING_MODE?: string;
   CALLER_PHONE_NUMBER: string;
   OUTBOUND_TOKEN: string;
 }
@@ -52,7 +50,8 @@ export interface Config {
   allowedCaller: string;
   telnyxNumber: string;
   connectionId: string;
-  threadId: string;
+  projectId: string;
+  captainId: string;
   capyBase: string;
   language: Language;
   maxCallMs: number;
@@ -61,11 +60,8 @@ export interface Config {
   holdMusicAfterMs: number;
   replyTimeoutMs: number;
   holdMusicUrl: string;
-  callModel: string | null;
-  callReasoning: string | null;
-  callFast: boolean;
-  axoModel: string | null;
-  axoReasoning: string;
+  callModel: string;
+  callReasoning: string;
   maxSpokenChars: number;
   idleMs: number;
   greetingTimeoutMs: number;
@@ -96,7 +92,8 @@ export function parseConfig(env: Env): Config {
     allowedCaller: env.CALLER_PHONE_NUMBER,
     telnyxNumber: env.TELNYX_PHONE_NUMBER,
     connectionId: env.TELNYX_CONNECTION_ID,
-    threadId: env.CAPY_THREAD_ID,
+    projectId: env.CAPY_PROJECT_ID,
+    captainId: env.CAPY_CAPTAIN_ID,
     capyBase: CAPY_API_BASE,
     language: { speak: 'en-US', stt: 'en', name: 'English', strings: STRINGS },
     maxCallMs: MAX_CALL_SECONDS * 1000,
@@ -105,11 +102,8 @@ export function parseConfig(env: Env): Config {
     holdMusicAfterMs: 15_000,
     replyTimeoutMs: 300_000,
     holdMusicUrl: HOLD_MUSIC_URL,
-    callModel: env.CAPY_CALL_MODEL_ID?.trim() || null,
-    callReasoning: env.CAPY_CALL_REASONING_MODE === 'off' ? null : reasoning(env.CAPY_CALL_REASONING_MODE, 'low', 'CAPY_CALL_REASONING_MODE'),
-    callFast: env.CAPY_CALL_FAST_MODE !== 'false',
-    axoModel: env.CAPY_DEFAULT_MODEL_ID?.trim() || null,
-    axoReasoning: reasoning(env.CAPY_DEFAULT_REASONING_MODE, 'high', 'CAPY_DEFAULT_REASONING_MODE'),
+    callModel: env.CAPY_CALL_MODEL_ID?.trim() || 'anthropic/claude-sonnet-5-5',
+    callReasoning: reasoning(env.CAPY_CALL_REASONING_MODE, 'low', 'CAPY_CALL_REASONING_MODE'),
     maxSpokenChars: 700,
     idleMs: 20_000,
     greetingTimeoutMs: 20_000,

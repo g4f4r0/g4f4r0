@@ -8,7 +8,7 @@ sequenceDiagram
   participant J as Johan's mobile
   participant T as Telnyx
   participant W as Worker + Durable Object
-  participant C as Capy thread GFR-4
+  participant C as Call thread in Axo's crew
   J->>T: calls the number
   T->>W: call.initiated (signed)
   W->>C: start message (only if the caller is CALLER_PHONE_NUMBER, else reject)
@@ -28,7 +28,7 @@ sequenceDiagram
 - A call opens with a `[Channel: Phone call] [Event: Incoming call] [From: Johan] [Time: <time>]` message naming the caller, the local time and how to talk on the phone. The phone keeps ringing until Axo's greeting lands, so the first thing Johan hears is Axo; after 20 seconds (Axo can take about 10 seconds to wake) the bridge answers with "Hey Johan." and speaks Axo's greeting when it arrives.
 - What Johan says is sent as `[Channel: Phone call] [From: Johan] ...` with `interrupt` delivery. The bridge reads the thread's live stream and speaks each finished sentence of Axo's reply as it is written, before the message commits, cleaned of markdown and links and cut at 700 characters. If Axo starts a tool before saying anything, a short filler plays at once. A reply that lands just after Johan says something else is still spoken. Sends to Capy time out after 3 seconds and retry once with the same client key, which Capy deduplicates.
 - Speech is transcribed with Deepgram Flux, which detects the end of his turn itself, so his words are sent 0.4 seconds after each final transcript. If Telnyx rejects Flux the bridge falls back to Nova-3, where a final transcript that ends a sentence is sent after 0.4 seconds and one that trails off after 1.2 seconds; interim transcripts keep the turn open while he is still talking, so a pause mid-sentence does not split it. A final transcript also wakes the open reply stream so the send is not held behind it. If he talks over Axo (two words or more, or one stop word such as "wait"), playback stops on the first interim transcript, the rest of that reply is dropped, and his words go to Axo. Single-word backchannels while Axo talks, and transcripts that match what the bridge just said, are ignored as echo.
-- Every call message switches Axo to `CAPY_CALL_MODEL_ID` at `CAPY_CALL_REASONING_MODE`, adding fast mode when `CAPY_CALL_FAST_MODE` is on and the model catalog offers it. With fast mode off and both model ids set, no catalog read happens before the first send. The call-ended message switches it back to `CAPY_DEFAULT_MODEL_ID` at `CAPY_DEFAULT_REASONING_MODE`, including when the bridge ends the call itself. If Capy rejects the selection, the message is sent without it. All of these live in `[vars]` in `wrangler.toml`, so switching models is a one-line change and a deploy.
+- Each call runs in its own small Capy thread, created when the call starts in Axo's crew on `CAPY_CALL_MODEL_ID` at `CAPY_CALL_REASONING_MODE`, so replies start on a tiny context instead of Axo's full Captain thread (measured 3.9 s first reply, 2.7 s after, against 4 to 16.5 s on GFR-4). When the call ends the thread is told to report a short summary to Axo, and the bridge archives it three minutes later. Axo's own model is never touched.
 - After 20 seconds of silence Axo is asked to check in; after another 20 seconds it says goodbye and the call hangs up. When Axo answers a goodbye with a line ending in `[Hang up]`, the bridge speaks the line and hangs up. When a call ends, a `[Channel: Phone call] [Event: Call ended] [Duration: <duration>] [Ended by: <who>]` message is queued in the thread.
 - Hold: when Axo knows work will be long it ends a line with `[Hold]` ("Let me run the tests. [Hold]"). The bridge speaks the line without the tag and starts looping hold music as soon as it finishes. Quick answers get no music. If Axo has said nothing after 6 seconds the caller hears a short natural filler such as "Mm, let me see.", and if Axo stays quiet for 15 seconds the music starts anyway. The music stops when Axo's next message lands or Johan talks. After 300 seconds with no reply at all the call ends with a note that the answer will be in the thread.
 - The hold music is "Local Forecast - Elevator" by Kevin MacLeod (incompetech.com), licensed under Creative Commons Attribution 4.0, served from `public/hold.mp3` as a Workers static asset.
@@ -45,7 +45,7 @@ curl -X POST https://g4f4r0-axo.<account-subdomain>.workers.dev/call \
 ```
 
 - `text` (required, at most 1000 characters) is spoken when Johan answers.
-- `listen` (optional, default false). When true the call stays open after the alert and whatever Johan answers is sent into GFR-4 with the alert as context, then Axo's reply is spoken, turn by turn. When false the call hangs up after the alert.
+- `listen` (optional, default false). When true the call stays open after the alert and whatever Johan answers is sent into a new call thread with the alert as context, then Axo's reply is spoken, turn by turn. When false the call hangs up after the alert.
 - Responses: `202` call is being placed, `401` missing or wrong token (no call is placed), `400` bad body, `429` daily limit reached, `502` Telnyx refused the call.
 
 The call always goes to `CALLER_PHONE_NUMBER`; the endpoint cannot dial anything else.
@@ -56,12 +56,10 @@ Fixed settings (caller name, time zone, voice, speech model, key terms, timings,
 
 | Variable | Meaning |
 | --- | --- |
-| `CAPY_THREAD_ID` | Thread that receives the calls (GFR-4) |
-| `CAPY_CALL_MODEL_ID` | Model Axo runs on during a call (`anthropic/claude-sonnet-5-5`, Axo's own model, so its prompt cache stays warm); defaults to Axo's own model |
-| `CAPY_CALL_REASONING_MODE` | Reasoning during a call, `low` by default; `off` leaves Axo untouched |
-| `CAPY_CALL_FAST_MODE` | `true` uses fast mode during a call when the call model offers it |
-| `CAPY_DEFAULT_MODEL_ID` | Model restored when the call ends; defaults to the thread's last model |
-| `CAPY_DEFAULT_REASONING_MODE` | Reasoning restored when the call ends, `high` by default |
+| `CAPY_PROJECT_ID` | Project the call threads are created in (GFR) |
+| `CAPY_CAPTAIN_ID` | Captain the call threads report to (Axo, GFR-4) |
+| `CAPY_CALL_MODEL_ID` | Model a call thread runs on, `anthropic/claude-sonnet-5-5` by default |
+| `CAPY_CALL_REASONING_MODE` | Reasoning in a call thread, `low` by default |
 | `TELNYX_CONNECTION_ID` | Telnyx Call Control application (g4f4r0-axo) the number is assigned to |
 
 ## Secrets
@@ -72,7 +70,7 @@ Set with `wrangler secret put <NAME>` (or through the Cloudflare API). Never com
 | --- | --- |
 | `TELNYX_API_KEY` | Telnyx API v2 key |
 | `TELNYX_PUBLIC_KEY` | Telnyx account public key (Mission Control, Keys and Credentials, Public Key); base64 Ed25519 |
-| `CAPY_API_KEY` | Capy API key that can write to and read from the GFR-4 thread (Settings, API) |
+| `CAPY_API_KEY` | Capy API key that can write to and read from the call threads (Settings, API) |
 | `TELNYX_PHONE_NUMBER` | The purchased Telnyx number in E.164, used as the caller id of outbound calls |
 | `CALLER_PHONE_NUMBER` | Johan's mobile in E.164, the only number that is answered and the number outbound calls go to |
 | `OUTBOUND_TOKEN` | Random bearer token for `POST /call`; generate with `openssl rand -hex 32` |

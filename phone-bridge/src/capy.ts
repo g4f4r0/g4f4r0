@@ -21,25 +21,16 @@ export interface ReplyWindow {
   toolStarted: boolean;
 }
 
-export interface ModelSelection {
-  modelId: string;
-  reasoningMode?: string;
-  modes?: { fast?: boolean };
-}
-
-export interface Models {
-  current: string | null;
-  fast: string[];
-}
-
 export interface CapyApi {
-  send(text: string, clientKey: string, delivery?: 'interrupt' | 'queue', model?: ModelSelection): Promise<string>;
-  readModels(): Promise<Models>;
-  readReplies(afterId: string, windowMs: number, wake?: AbortSignal): Promise<ReplyWindow>;
+  createThread(message: string, requestId: string, title: string): Promise<string>;
+  send(threadId: string, text: string, clientKey: string, delivery?: 'interrupt' | 'queue'): Promise<string>;
+  readReplies(threadId: string, afterId: string, windowMs: number, wake?: AbortSignal): Promise<ReplyWindow>;
+  archive(threadId: string): Promise<void>;
 }
 
 const BATCH_MS = 150;
 const SEND_TIMEOUT_MS = 3000;
+const CREATE_TIMEOUT_MS = 8000;
 
 export function parseFrames(buffer: string): { frames: { id?: string; event: string; data: string }[]; rest: string } {
   const parts = buffer.split(/\r?\n\r?\n/);
@@ -61,40 +52,40 @@ export function parseFrames(buffer: string): { frames: { id?: string; event: str
 }
 
 export function createCapy(apiKey: string, cfg: Config, fetcher: typeof fetch = fetch): CapyApi {
-  const url = (path: string) => `${cfg.capyBase}/threads/${cfg.threadId}${path}`;
+  const url = (threadId: string, path: string) => `${cfg.capyBase}/threads/${threadId}${path}`;
   const headers = { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' };
+  const post = async (path: string, body: object, timeoutMs = SEND_TIMEOUT_MS): Promise<any> => {
+    const once = () => fetcher(path, { method: 'POST', headers, body: JSON.stringify(body), signal: AbortSignal.timeout(timeoutMs) });
+    let res = await once().catch(() => null);
+    if (!res || res.status >= 500 || res.status === 429) res = await once();
+    if (!res.ok) throw new Error(`capy ${path.slice(cfg.capyBase.length)} failed with ${res.status}: ${(await res.text()).slice(0, 300)}`);
+    return res.json();
+  };
 
   return {
-    send: async (text, clientKey, delivery = 'interrupt', model) => {
-      const post = (withModel: boolean) =>
-        fetcher(url('/message'), {
-          method: 'POST',
-          headers,
-          body: JSON.stringify({ text, delivery, clientKey, ...(withModel && model ? { model } : {}) }),
-          signal: AbortSignal.timeout(SEND_TIMEOUT_MS),
-        });
-      let res = await post(true).catch(() => null);
-      if (!res || res.status >= 500 || res.status === 429) res = await post(true);
-      if (res.status === 400 && model) res = await post(false);
-      if (!res.ok) throw new Error(`capy send failed with ${res.status}: ${(await res.text()).slice(0, 300)}`);
-      return ((await res.json()) as { id: string }).id;
+    createThread: async (message, requestId, title) => {
+      const thread = await post(
+        `${cfg.capyBase}/threads`,
+        {
+          requestId,
+          projectId: cfg.projectId,
+          captainId: cfg.captainId,
+          title,
+          message,
+          model: { modelId: cfg.callModel, reasoningMode: cfg.callReasoning },
+          machineSize: 'small',
+        },
+        CREATE_TIMEOUT_MS,
+      );
+      return (thread as { id: string }).id;
     },
 
-    readModels: async () => {
-      const get = async (path: string) => {
-        const res = await fetcher(path, { headers, signal: AbortSignal.timeout(SEND_TIMEOUT_MS) });
-        if (!res.ok) throw new Error(`capy ${path} failed with ${res.status}`);
-        return res.json() as Promise<any>;
-      };
-      const [thread, models] = await Promise.all([get(url('')), get(`${cfg.capyBase}/models`)]);
-      const list: any[] = Array.isArray(models) ? models : (models?.items ?? []);
-      return {
-        current: typeof thread?.lastModelId === 'string' ? thread.lastModelId : null,
-        fast: list.filter(m => m?.fast === true && typeof m.id === 'string').map(m => m.id),
-      };
-    },
+    send: async (threadId, text, clientKey, delivery = 'interrupt') =>
+      ((await post(url(threadId, '/message'), { text, delivery, clientKey })) as { id: string }).id,
 
-    readReplies: async (afterId, windowMs, wake) => {
+    archive: async threadId => void (await post(url(threadId, '/archive'), {})),
+
+    readReplies: async (threadId, afterId, windowMs, wake) => {
       const result: ReplyWindow = { items: [], live: [], cursor: afterId, status: null, worked: false, toolStarted: false };
       const abort = new AbortController();
       wake?.addEventListener('abort', () => abort.abort());
@@ -104,7 +95,7 @@ export function createCapy(apiKey: string, cfg: Config, fetcher: typeof fetch = 
         timer = setTimeout(() => abort.abort(), BATCH_MS);
       };
       try {
-        const res = await fetcher(url(`/stream?after=${encodeURIComponent(afterId)}`), {
+        const res = await fetcher(url(threadId, afterId ? `/stream?after=${encodeURIComponent(afterId)}` : '/stream'), {
           headers: { ...headers, accept: 'text/event-stream' },
           signal: abort.signal,
         });

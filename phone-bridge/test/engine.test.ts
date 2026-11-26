@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { Bridge, type CallState, type Store } from '../src/engine';
 import { parseConfig, type Env } from '../src/config';
 import { encodeState } from '../src/telnyx';
-import type { CapyMessage, ModelSelection } from '../src/capy';
+import type { CapyMessage } from '../src/capy';
 
 const ALLOWED = '+15555550100';
 const REAL_ID = 'v3:ie0odK7cm5dCtztjy7_cbP30iOz-ruWD1g8xOEegMCBlZhv9DwtKqg';
@@ -11,6 +11,7 @@ function setup(overrides: Partial<Env> = {}) {
   const calls = new Map<string, CallState>();
   const counts = new Map<string, number>();
   const seen = new Set<string>();
+  const archives = new Map<string, number>();
   const store: Store = {
     count: d => counts.get(d) ?? 0,
     increment: d => void counts.set(d, (counts.get(d) ?? 0) + 1),
@@ -19,12 +20,15 @@ function setup(overrides: Partial<Env> = {}) {
     deleteCall: id => void calls.delete(id),
     listCalls: () => [...calls.values()],
     markSeen: id => (seen.has(id) ? false : (seen.add(id), true)),
+    archiveLater: (id, at) => void archives.set(id, at),
+    dueArchives: now => [...archives].filter(([, at]) => at <= now).map(([id]) => (archives.delete(id), id)),
+    nextArchiveAt: () => (archives.size ? Math.min(...archives.values()) : null),
   };
   const log: string[] = [];
-  const sent: { text: string; key: string; delivery: string; model?: ModelSelection }[] = [];
-  const axo = { queue: [] as CapyMessage[], status: 'working', worked: true, sendFails: 0, readFails: 0, models: { current: 'anthropic/claude-sonnet-5-5' as string | null, fast: ['anthropic/claude-opus-5-5'] }, live: [] as { callId: string; text: string }[], tool: false, stt: 'deepgram/nova-3' };
+  const sent: { text: string; key: string; delivery: string; thread: string }[] = [];
+  const axo = { queue: [] as CapyMessage[], status: 'working', worked: true, sendFails: 0, readFails: 0, live: [] as { callId: string; text: string }[], tool: false, stt: 'deepgram/nova-3' };
   const clock = { now: Date.UTC(2026, 10, 26, 18, 0) };
-  const env = { CALLER_PHONE_NUMBER: ALLOWED, TELNYX_PHONE_NUMBER: '+15555550199', TELNYX_CONNECTION_ID: 'c', CAPY_THREAD_ID: 'jam_x', ...overrides } as Env;
+  const env = { CALLER_PHONE_NUMBER: ALLOWED, TELNYX_PHONE_NUMBER: '+15555550199', TELNYX_CONNECTION_ID: 'c', CAPY_PROJECT_ID: 'project_x', CAPY_CAPTAIN_ID: 'jam_axo', ...overrides } as Env;
   const cfg = parseConfig(env);
   let m = 0;
   const bridge = new Bridge({
@@ -44,13 +48,18 @@ function setup(overrides: Partial<Env> = {}) {
       dial: async s => (log.push(`dial ${JSON.stringify(s)}`), 'out-1'),
     },
     capy: {
-      readModels: async () => axo.models,
-      send: async (text, key, delivery = 'interrupt', model) => {
+      createThread: async (text, key) => {
         if (axo.sendFails > 0 && axo.sendFails--) throw new Error('capy down');
-        sent.push({ text, key, delivery, model });
+        sent.push({ text, key, delivery: 'interrupt', thread: 'new' });
+        return 'jam_call';
+      },
+      send: async (thread, text, key, delivery = 'interrupt') => {
+        if (axo.sendFails > 0 && axo.sendFails--) throw new Error('capy down');
+        sent.push({ text, key, delivery, thread });
         return `01MSG${String(++m).padStart(21, '0')}`;
       },
-      readReplies: async afterId => {
+      archive: async thread => void log.push(`archive ${thread}`),
+      readReplies: async (_thread, afterId) => {
         if (axo.readFails > 0 && axo.readFails--) throw new Error('stream 503');
         const w = { items: axo.queue.splice(0), live: axo.live.splice(0), cursor: afterId, status: axo.status, worked: axo.worked, toolStarted: axo.tool };
         axo.tool = false;
@@ -525,20 +534,17 @@ describe('inbound: silence and hang up', () => {
     expect(s.store.getCall('c1')).toBeUndefined();
   });
 
-  it('runs Axo on low reasoning during the call and restores its usual setting at the end', async () => {
-    await s.say('quick one');
-    for (const x of s.sent) expect(x.model).toEqual({ modelId: 'anthropic/claude-sonnet-5-5', reasoningMode: 'low' });
+  it('runs the call in its own crew thread, asks it to report, and archives it later', async () => {
+    await s.say('hi');
+    expect(s.sent[0].thread).toBe('new');
+    expect(s.sent[1].thread).toBe('jam_call');
     await s.evt('call.hangup', { call_control_id: 'c1', hangup_source: 'caller' });
-    expect(s.sent.at(-1)?.model).toEqual({ modelId: 'anthropic/claude-sonnet-5-5', reasoningMode: 'high' });
-  });
-
-  it('restores the model even when the hangup event never arrives', async () => {
-    await s.tick(s.cfg.maxCallMs);
-    await s.tick(11_000);
-    expect(s.sent.at(-1)?.text).toMatch(/\[Event: Call ended\]/);
-    expect(s.sent.at(-1)?.model?.reasoningMode).toBe('high');
-    await s.evt('call.hangup', { call_control_id: 'c1', hangup_source: 'callee' });
-    expect(s.sent.filter(x => x.text.includes('[Event: Call ended]'))).toHaveLength(1);
+    expect(s.sent.at(-1)?.thread).toBe('jam_call');
+    expect(s.sent.at(-1)?.text).toContain('Report to your Captain');
+    await s.tick(179_000);
+    expect(s.log).not.toContain('archive jam_call');
+    await s.tick(2000);
+    expect(s.log).toContain('archive jam_call');
   });
 
   it('ends the call at the length cap and hangs up', async () => {
@@ -553,37 +559,6 @@ describe('inbound: silence and hang up', () => {
     await s.tick(11_000);
     expect(s.log).toContain('hangup c1');
     expect(s.store.getCall('c1')).toBeUndefined();
-  });
-});
-
-describe('call model', () => {
-  it('switches to the configured call model with fast mode when offered, and restores Axo\'s own model', async () => {
-    const s = setup({ CAPY_CALL_MODEL_ID: 'anthropic/claude-opus-5-5' });
-    await s.ring();
-    expect(s.sent[0].model).toEqual({ modelId: 'anthropic/claude-opus-5-5', reasoningMode: 'low', modes: { fast: true } });
-    await s.evt('call.hangup', { call_control_id: 'c1', hangup_source: 'caller' });
-    expect(s.sent.at(-1)?.model).toEqual({ modelId: 'anthropic/claude-sonnet-5-5', reasoningMode: 'high' });
-  });
-
-  it('skips fast mode when the model does not offer it or CAPY_CALL_FAST_MODE is false', async () => {
-    const s = setup({ CAPY_CALL_MODEL_ID: 'anthropic/claude-haiku-5-5' });
-    await s.ring();
-    expect(s.sent[0].model).toEqual({ modelId: 'anthropic/claude-haiku-5-5', reasoningMode: 'low' });
-    const n = setup({ CAPY_CALL_MODEL_ID: 'anthropic/claude-opus-5-5', CAPY_CALL_FAST_MODE: 'false' });
-    await n.ring();
-    expect(n.sent[0].model).toEqual({ modelId: 'anthropic/claude-opus-5-5', reasoningMode: 'low' });
-  });
-
-  it('leaves the model alone when it cannot read it or when switched off', async () => {
-    const s = setup();
-    s.axo.models = { current: null, fast: [] };
-    await s.ring();
-    expect(s.sent[0].model).toBeUndefined();
-    await s.evt('call.hangup', { call_control_id: 'c1', hangup_source: 'caller' });
-    expect(s.sent.at(-1)?.model).toBeUndefined();
-    const off = setup({ CAPY_CALL_REASONING_MODE: 'off' });
-    await off.ring();
-    expect(off.sent[0].model).toBeUndefined();
   });
 });
 
