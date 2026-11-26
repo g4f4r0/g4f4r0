@@ -46,7 +46,7 @@ export const LANGUAGES: Record<string, Language> = {
   en: {
     speak: 'en-US',
     stt: 'en',
-    voice: 'AWS.Polly.Joanna-Neural',
+    voice: 'Telnyx.Ultra.47c38ca4-5f35-497b-b1a3-415245fb35e1',
     name: 'English',
     strings: {
       greeting: 'Axo here. Go ahead.',
