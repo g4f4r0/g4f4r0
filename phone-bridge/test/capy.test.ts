@@ -29,6 +29,28 @@ describe('capy send', () => {
   });
 });
 
+describe('capy model selection', () => {
+  it('sends the model selection and falls back to a plain send if Capy rejects it', async () => {
+    const bodies: any[] = [];
+    const fetcher = (async (_url: string, init: RequestInit) => {
+      const b = JSON.parse(String(init.body));
+      bodies.push(b);
+      return b.model ? new Response('{"code":"ModelSelection.Rejected"}', { status: 400 }) : Response.json({ id: 'msg3' });
+    }) as unknown as typeof fetch;
+    const id = await createCapy('k', cfg, fetcher).send('hi', 'phone-1-3', 'interrupt', { modelId: 'x/y', reasoningMode: 'low' });
+    expect(id).toBe('msg3');
+    expect(bodies.map(b => b.model?.reasoningMode ?? null)).toEqual(['low', null]);
+  });
+
+  it('reads the thread model and whether it offers fast mode', async () => {
+    const fetcher = (async (url: string) =>
+      url.endsWith('/models')
+        ? Response.json({ items: [{ id: 'anthropic/claude-opus-5-5', fast: true }, { id: 'anthropic/claude-sonnet-5-5', fast: false }] })
+        : Response.json({ id: 'jam_t', lastModelId: 'anthropic/claude-opus-5-5' })) as unknown as typeof fetch;
+    expect(await createCapy('k', cfg, fetcher).currentModel()).toEqual({ modelId: 'anthropic/claude-opus-5-5', fast: true });
+  });
+});
+
 describe('capy stream', () => {
   const sse = (frames: string) =>
     (async () => new Response(new ReadableStream({ start(c) { c.enqueue(new TextEncoder().encode(frames)); } }), { headers: { 'content-type': 'text/event-stream' } })) as unknown as typeof fetch;

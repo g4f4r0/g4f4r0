@@ -21,8 +21,20 @@ export interface ReplyWindow {
   toolStarted: boolean;
 }
 
+export interface ModelSelection {
+  modelId: string;
+  reasoningMode?: string;
+  modes?: { fast?: boolean };
+}
+
+export interface CurrentModel {
+  modelId: string;
+  fast: boolean;
+}
+
 export interface CapyApi {
-  send(text: string, clientKey: string, delivery?: 'interrupt' | 'queue'): Promise<string>;
+  send(text: string, clientKey: string, delivery?: 'interrupt' | 'queue', model?: ModelSelection): Promise<string>;
+  currentModel(): Promise<CurrentModel | null>;
   readReplies(afterId: string, windowMs: number): Promise<ReplyWindow>;
 }
 
@@ -53,13 +65,32 @@ export function createCapy(apiKey: string, cfg: Config, fetcher: typeof fetch = 
   const headers = { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' };
 
   return {
-    send: async (text, clientKey, delivery = 'interrupt') => {
-      const body = JSON.stringify({ text, delivery, clientKey });
-      const post = () => fetcher(url('/message'), { method: 'POST', headers, body, signal: AbortSignal.timeout(SEND_TIMEOUT_MS) });
-      let res = await post().catch(() => null);
-      if (!res || res.status >= 500 || res.status === 429) res = await post();
+    send: async (text, clientKey, delivery = 'interrupt', model) => {
+      const post = (withModel: boolean) =>
+        fetcher(url('/message'), {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ text, delivery, clientKey, ...(withModel && model ? { model } : {}) }),
+          signal: AbortSignal.timeout(SEND_TIMEOUT_MS),
+        });
+      let res = await post(true).catch(() => null);
+      if (!res || res.status >= 500 || res.status === 429) res = await post(true);
+      if (res.status === 400 && model) res = await post(false);
       if (!res.ok) throw new Error(`capy send failed with ${res.status}: ${(await res.text()).slice(0, 300)}`);
       return ((await res.json()) as { id: string }).id;
+    },
+
+    currentModel: async () => {
+      const get = async (path: string) => {
+        const res = await fetcher(path, { headers, signal: AbortSignal.timeout(SEND_TIMEOUT_MS) });
+        if (!res.ok) throw new Error(`capy ${path} failed with ${res.status}`);
+        return res.json() as Promise<any>;
+      };
+      const [thread, models] = await Promise.all([get(url('')), get(`${cfg.capyBase}/models`)]);
+      const modelId = typeof thread?.lastModelId === 'string' ? thread.lastModelId : null;
+      if (!modelId) return null;
+      const list: any[] = Array.isArray(models) ? models : (models?.items ?? []);
+      return { modelId, fast: list.some(m => m?.id === modelId && m?.fast === true) };
     },
 
     readReplies: async (afterId, windowMs) => {

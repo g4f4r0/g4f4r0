@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { Bridge, type CallState, type Store } from '../src/engine';
 import { parseConfig, type Env } from '../src/config';
 import { encodeState } from '../src/telnyx';
-import type { CapyMessage } from '../src/capy';
+import type { CapyMessage, ModelSelection } from '../src/capy';
 
 const ALLOWED = '+13072007045';
 const REAL_ID = 'v3:ie0odK7cm5dCtztjy7_cbP30iOz-ruWD1g8xOEegMCBlZhv9DwtKqg';
@@ -21,8 +21,8 @@ function setup(overrides: Partial<Env> = {}) {
     markSeen: id => (seen.has(id) ? false : (seen.add(id), true)),
   };
   const log: string[] = [];
-  const sent: { text: string; key: string; delivery: string }[] = [];
-  const axo = { queue: [] as CapyMessage[], status: 'working', worked: true, sendFails: 0, readFails: 0, live: [] as { callId: string; text: string }[], tool: false };
+  const sent: { text: string; key: string; delivery: string; model?: ModelSelection }[] = [];
+  const axo = { queue: [] as CapyMessage[], status: 'working', worked: true, sendFails: 0, readFails: 0, model: { modelId: 'anthropic/claude-sonnet-5-5', fast: false } as { modelId: string; fast: boolean } | null, live: [] as { callId: string; text: string }[], tool: false };
   const clock = { now: Date.UTC(2026, 10, 26, 18, 0) };
   const env = { HOLD_MUSIC_URL: 'https://x/hold.mp3', ALLOWED_CALLER: ALLOWED, TELNYX_NUMBER: '+13072070207', TELNYX_CONNECTION_ID: 'c', CAPY_THREAD_ID: 'jam_x', ...overrides } as Env;
   const cfg = parseConfig(env);
@@ -44,9 +44,10 @@ function setup(overrides: Partial<Env> = {}) {
       dial: async s => (log.push(`dial ${JSON.stringify(s)}`), 'out-1'),
     },
     capy: {
-      send: async (text, key, delivery = 'interrupt') => {
+      currentModel: async () => axo.model,
+      send: async (text, key, delivery = 'interrupt', model) => {
         if (axo.sendFails > 0 && axo.sendFails--) throw new Error('capy down');
-        sent.push({ text, key, delivery });
+        sent.push({ text, key, delivery, model });
         return `01MSG${String(++m).padStart(21, '0')}`;
       },
       readReplies: async afterId => {
@@ -476,6 +477,22 @@ describe('inbound: silence and hang up', () => {
     expect(s.store.getCall('c1')).toBeUndefined();
   });
 
+  it('runs Axo on low reasoning during the call and restores its usual setting at the end', async () => {
+    await s.say('quick one');
+    for (const x of s.sent) expect(x.model).toEqual({ modelId: 'anthropic/claude-sonnet-5-5', reasoningMode: 'low' });
+    await s.evt('call.hangup', { call_control_id: 'c1', hangup_source: 'caller' });
+    expect(s.sent.at(-1)?.model).toEqual({ modelId: 'anthropic/claude-sonnet-5-5', reasoningMode: 'high' });
+  });
+
+  it('restores the model even when the hangup event never arrives', async () => {
+    await s.tick(s.cfg.maxCallMs);
+    await s.tick(11_000);
+    expect(s.sent.at(-1)?.text).toMatch(/\[Event: Call ended\]/);
+    expect(s.sent.at(-1)?.model?.reasoningMode).toBe('high');
+    await s.evt('call.hangup', { call_control_id: 'c1', hangup_source: 'callee' });
+    expect(s.sent.filter(x => x.text.includes('[Event: Call ended]'))).toHaveLength(1);
+  });
+
   it('ends the call at the length cap and hangs up', async () => {
     await s.tick(s.cfg.maxCallMs);
     expect(s.log.some(l => l.includes('time limit') && l.includes('"end":true'))).toBe(true);
@@ -488,6 +505,27 @@ describe('inbound: silence and hang up', () => {
     await s.tick(11_000);
     expect(s.log).toContain('hangup c1');
     expect(s.store.getCall('c1')).toBeUndefined();
+  });
+});
+
+describe('call model', () => {
+  it('turns on fast mode when Axo\'s model offers it', async () => {
+    const s = setup();
+    s.axo.model = { modelId: 'anthropic/claude-opus-5-5', fast: true };
+    await s.ring();
+    expect(s.sent[0].model).toEqual({ modelId: 'anthropic/claude-opus-5-5', reasoningMode: 'low', modes: { fast: true } });
+  });
+
+  it('leaves the model alone when it cannot read it or when switched off', async () => {
+    const s = setup();
+    s.axo.model = null;
+    await s.ring();
+    expect(s.sent[0].model).toBeUndefined();
+    await s.evt('call.hangup', { call_control_id: 'c1', hangup_source: 'caller' });
+    expect(s.sent.at(-1)?.model).toBeUndefined();
+    const off = setup({ CALL_REASONING: 'off' });
+    await off.ring();
+    expect(off.sent[0].model).toBeUndefined();
   });
 });
 

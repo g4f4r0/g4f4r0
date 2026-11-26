@@ -1,5 +1,5 @@
 import type { Config } from './config';
-import type { CapyApi } from './capy';
+import type { CapyApi, CurrentModel, ModelSelection } from './capy';
 import type { TelnyxApi } from './telnyx';
 import { decodeState } from './telnyx';
 import { dayKey, isAllowedCaller, reserveOutbound, type CountStore } from './guards';
@@ -39,6 +39,8 @@ export interface CallState {
   recent: { text: string; at: number }[];
   lastActivityAt: number;
   idlePrompts: number;
+  model: CurrentModel | null;
+  modelChecked: boolean;
 }
 
 export interface Store extends CountStore {
@@ -218,12 +220,9 @@ export class Bridge {
       const { from, to, client_state, call_control_id, call_leg_id, call_session_id, connection_id, ...summary } = p;
       this.d.log(`call ended ${JSON.stringify(summary)}`);
       const call = store.getCall(id);
-      store.deleteCall(id);
-      if (call && (call.kind === 'in' || call.started)) {
+      if (call) {
         const ourSide = call.kind === 'in' ? 'callee' : 'caller';
-        const byUs = call.byeAt !== null || call.hangupAfterSpeech || p.hangup_source === ourSide;
-        const text = `[Channel: Phone call] [Event: Call ended] [Duration: ${formatDuration(now - call.startedAt)}] [Ended by: ${byUs ? 'Axo' : cfg.callerName}] The call is over. Nothing you send now is spoken. Reply only if there is follow-up work.`;
-        await this.d.capy.send(text, `phone-${call.startedAt}-end`, 'queue').catch(err => this.d.log(`end message failed: ${(err as Error).message}`));
+        await this.finish(call, call.byeAt !== null || call.hangupAfterSpeech || p.hangup_source === ourSide);
       }
       await this.rearm();
     }
@@ -277,6 +276,8 @@ export class Bridge {
       recent: [],
       lastActivityAt: now,
       idlePrompts: 0,
+      model: null,
+      modelChecked: false,
     };
   }
 
@@ -310,13 +311,32 @@ export class Bridge {
     return `[Channel: Phone call] ${who} [Time: ${time} ${cfg.timezone}] ${rules}${said}`;
   }
 
+  private async finish(call: CallState, byUs: boolean): Promise<void> {
+    const { cfg, store } = this.d;
+    store.deleteCall(call.id);
+    if (call.kind === 'out' && !call.started) return;
+    const restore: ModelSelection | undefined = call.model ? { modelId: call.model.modelId, reasoningMode: cfg.axoReasoning } : undefined;
+    const text = `[Channel: Phone call] [Event: Call ended] [Duration: ${formatDuration(this.d.now() - call.startedAt)}] [Ended by: ${byUs ? 'Axo' : cfg.callerName}] The call is over. Nothing you send now is spoken. Reply only if there is follow-up work.`;
+    await this.d.capy.send(text, `phone-${call.startedAt}-end`, 'queue', restore).catch(err => this.d.log(`end message failed: ${(err as Error).message}`));
+  }
+
   private async sendTurn(call: CallState, text: string, consumed = ''): Promise<void> {
+    const { cfg, capy } = this.d;
     call.turns++;
     if (!call.started) text = this.startMessage(call.kind === 'in' ? 'inbound' : 'outbound', text, call.alert);
-    const sentId = await this.d.capy.send(text, `phone-${call.startedAt}-${call.turns}`);
+    if (!call.modelChecked && cfg.callReasoning) {
+      call.model = await capy.currentModel().catch(err => (this.d.log(`reading Axo's model failed: ${(err as Error).message}`), null));
+      call.modelChecked = true;
+    }
+    const model: ModelSelection | undefined = call.model
+      ? { modelId: call.model.modelId, reasoningMode: cfg.callReasoning ?? undefined, ...(call.model.fast ? { modes: { fast: true } } : {}) }
+      : undefined;
+    const sentId = await capy.send(text, `phone-${call.startedAt}-${call.turns}`, 'interrupt', model);
     const fresh = this.d.store.getCall(call.id) ?? call;
     fresh.turns = call.turns;
     fresh.started = true;
+    fresh.model = call.model;
+    fresh.modelChecked = call.modelChecked;
     if (consumed && fresh.pending.startsWith(consumed)) fresh.pending = fresh.pending.slice(consumed.length).trim();
     const sentAt = this.d.now();
     const prev = fresh.waiting;
@@ -359,7 +379,7 @@ export class Bridge {
     if (call.byeAt) {
       if (now - call.byeAt >= BYE_GRACE_MS) {
         await telnyx.hangup(call.id).catch(() => undefined);
-        store.deleteCall(call.id);
+        await this.finish(call, true);
       }
       return;
     }

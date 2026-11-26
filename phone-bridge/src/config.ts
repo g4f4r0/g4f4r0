@@ -16,6 +16,8 @@ export interface Env {
   HOLD_MUSIC_AFTER_SECONDS?: string;
   REPLY_TIMEOUT_SECONDS?: string;
   HOLD_MUSIC_URL?: string;
+  CALL_REASONING?: string;
+  AXO_REASONING?: string;
   MAX_SPOKEN_CHARS?: string;
   IDLE_SECONDS?: string;
   GREETING_TIMEOUT_SECONDS?: string;
@@ -100,6 +102,8 @@ export interface Config {
   holdMusicAfterMs: number;
   replyTimeoutMs: number;
   holdMusicUrl: string;
+  callReasoning: string | null;
+  axoReasoning: string;
   maxSpokenChars: number;
   idleMs: number;
   greetingTimeoutMs: number;
@@ -122,6 +126,14 @@ const int = (raw: string | undefined, fallback: number, name: string): number =>
   return n;
 };
 
+const REASONING = ['none', 'instant', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
+
+const reasoning = (raw: string | undefined, fallback: string, name: string): string => {
+  const value = (raw ?? fallback).trim();
+  if (!REASONING.includes(value)) throw new Error(`${name} must be one of ${REASONING.join(', ')}`);
+  return value;
+};
+
 export function parseConfig(env: Env): Config {
   const language = LANGUAGES[(env.LANGUAGE ?? 'en').toLowerCase()];
   if (!language) throw new Error(`LANGUAGE must be one of: ${Object.keys(LANGUAGES).join(', ')}`);
@@ -138,6 +150,8 @@ export function parseConfig(env: Env): Config {
     holdMusicAfterMs: int(env.HOLD_MUSIC_AFTER_SECONDS, 15, 'HOLD_MUSIC_AFTER_SECONDS') * 1000,
     replyTimeoutMs: int(env.REPLY_TIMEOUT_SECONDS, 300, 'REPLY_TIMEOUT_SECONDS') * 1000,
     holdMusicUrl: env.HOLD_MUSIC_URL ?? '',
+    callReasoning: env.CALL_REASONING === 'off' ? null : reasoning(env.CALL_REASONING, 'low', 'CALL_REASONING'),
+    axoReasoning: reasoning(env.AXO_REASONING, 'high', 'AXO_REASONING'),
     maxSpokenChars: int(env.MAX_SPOKEN_CHARS, 700, 'MAX_SPOKEN_CHARS'),
     idleMs: int(env.IDLE_SECONDS, 20, 'IDLE_SECONDS') * 1000,
     greetingTimeoutMs: int(env.GREETING_TIMEOUT_SECONDS, 20, 'GREETING_TIMEOUT_SECONDS') * 1000,
