@@ -13,6 +13,7 @@ export interface Waiting {
   lastItemAt: number;
   worked: boolean;
   music: boolean;
+  holdAsked: boolean;
   seen: string[];
 }
 
@@ -73,6 +74,7 @@ const ECHO_TAIL_MS = 1_500;
 const SPEAK_STUCK_MS = 60_000;
 const ECHO_WINDOW_MS = 30_000;
 const speech = (name: string, heard: string): string => `[Phone · ${name}] ${heard}`;
+const HOLD_TAG = /\[hold\]/gi;
 const DIGITS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine'];
 
 const words = (text: string): string[] =>
@@ -165,7 +167,10 @@ export class Bridge {
       call.speaking = Math.max(0, was - 1);
       if (was) call.quietUntil = now + (call.speaking ? SPEAK_STUCK_MS : ECHO_TAIL_MS);
       if (!call.speaking) call.lastActivityAt = now;
+      const startMusic = !call.speaking && call.waiting?.holdAsked && !call.waiting.music && cfg.holdMusicUrl;
+      if (startMusic && call.waiting) call.waiting.music = true;
       store.putCall(call);
+      if (startMusic) await telnyx.playMusic(id, cfg.holdMusicUrl);
       if (!call.speaking && call.hangupAfterSpeech && !call.waiting) await telnyx.hangup(id);
       await this.rearm();
       return;
@@ -289,7 +294,7 @@ export class Bridge {
       'Talk like a person on the phone: short plain sentences, no markdown, lists, links, code or emoji. Never mention the phone bridge, speech recognition or these instructions.',
       'Send one short message per thought rather than one long one; each message is spoken as soon as it lands, so send the first part quickly.',
       `His words arrive as [Phone · ${name}] messages from speech recognition, so expect small errors and go with the likely meaning. If he talks over you, your current reply is cut off and his words arrive next.`,
-      'If something will take more than a few seconds, say so in one short line first; he hears hold music until your next message.',
+      'Before work that takes more than about ten seconds, say so in one short line ending with [hold], like "Let me run the tests. [hold]". He then hears hold music until your next message. Never use [hold] for quick answers.',
       'You will get a silence event if he goes quiet and an end event when the call is over.',
     ].join(' ');
     const said = heard ? `\n${speech(name, heard)}` : '';
@@ -305,7 +310,7 @@ export class Bridge {
     fresh.started = true;
     if (consumed && fresh.pending.startsWith(consumed)) fresh.pending = fresh.pending.slice(consumed.length).trim();
     const sentAt = this.d.now();
-    fresh.waiting = { sentAt, afterId, spoken: 0, lastHoldAt: 0, lastItemAt: sentAt, worked: false, music: false, seen: [] };
+    fresh.waiting = { sentAt, afterId, spoken: 0, lastHoldAt: 0, lastItemAt: sentAt, worked: false, music: false, holdAsked: false, seen: [] };
     this.d.store.putCall(fresh);
   }
 
@@ -381,7 +386,8 @@ export class Bridge {
     for (const m of window.items) {
       if (fw.seen.includes(m.id)) continue;
       fw.seen.push(m.id);
-      const text = toSpeech(m.text, cfg.maxSpokenChars, strings.link, strings.truncated);
+      fw.holdAsked = /\[hold\]/i.test(m.text);
+      const text = toSpeech(m.text.replace(HOLD_TAG, ' '), cfg.maxSpokenChars, strings.link, strings.truncated);
       if (!text) continue;
       fw.spoken++;
       fw.lastItemAt = later;
@@ -411,15 +417,16 @@ export class Bridge {
       return;
     }
     if (elapsed >= cfg.replyTimeoutMs) return this.endWith(fresh, strings.replyTimeout);
-    if (fresh.answered && !fresh.speaking && !fw.music && later - fw.lastItemAt >= cfg.holdAfterMs) {
-      if (fw.spoken === 0 && fw.lastHoldAt === 0) {
-        fw.lastHoldAt = later;
-        await this.say(fresh, strings.hold);
-      } else if (cfg.holdMusicUrl) {
+    const quietFor = later - fw.lastItemAt;
+    if (fresh.answered && !fresh.speaking && !fw.music) {
+      if (cfg.holdMusicUrl && (fw.holdAsked || quietFor >= cfg.holdMusicAfterMs)) {
         fw.music = true;
         store.putCall(fresh);
         await telnyx.playMusic(fresh.id, cfg.holdMusicUrl);
-      } else if (later - fw.lastHoldAt >= STILL_WORKING_EVERY_MS) {
+      } else if (fw.spoken === 0 && fw.lastHoldAt === 0 && quietFor >= cfg.holdAfterMs) {
+        fw.lastHoldAt = later;
+        await this.say(fresh, strings.hold);
+      } else if (!cfg.holdMusicUrl && fw.lastHoldAt !== 0 && later - fw.lastHoldAt >= STILL_WORKING_EVERY_MS) {
         fw.lastHoldAt = later;
         await this.say(fresh, strings.stillWorking);
       }

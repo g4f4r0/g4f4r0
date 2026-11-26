@@ -29,8 +29,8 @@ sequenceDiagram
 - What Johan says is sent as `[Phone · Johan] ...` with `interrupt` delivery. The bridge reads the thread's live stream and speaks each assistant message the moment it commits, cleaned of markdown and links and cut at `MAX_SPOKEN_CHARS`.
 - If Johan talks over Axo, playback stops, the rest of that reply is dropped, and his words go to Axo. Transcripts that match what the bridge just said are ignored as echo.
 - After `IDLE_SECONDS` of silence Axo is asked to check in; after another `IDLE_SECONDS` it says goodbye and the call hangs up. When a call ends, a `[Phone call ended · <duration> · <who> hung up · <n> turns]` message is queued in the thread.
-- When Axo works for `HOLD_AFTER_SECONDS` without a new message, the caller hears "One moment." (only if Axo has said nothing yet) and then looping hold music from `HOLD_MUSIC_URL`. The music stops as soon as Axo's next message lands or Johan talks. Without a music URL the bridge says "still working" every 30 seconds instead. After `REPLY_TIMEOUT_SECONDS` with no reply at all the call ends with a note that the answer will be in the thread.
-- The hold music is "The Entertainer" by Scott Joplin, a 1902 piano roll recording in the public domain (Wikimedia Commons), served from `public/hold.mp3` as a Workers static asset.
+- Hold: when Axo knows work will be long it ends a line with `[hold]` ("Let me run the tests. [hold]"). The bridge speaks the line without the tag and starts looping hold music from `HOLD_MUSIC_URL` as soon as it finishes. Quick answers get no music. If Axo has said nothing after `HOLD_AFTER_SECONDS` the caller hears "One moment.", and if Axo stays quiet for `HOLD_MUSIC_AFTER_SECONDS` the music starts anyway. The music stops when Axo's next message lands or Johan talks. After `REPLY_TIMEOUT_SECONDS` with no reply at all the call ends with a note that the answer will be in the thread.
+- The hold music is "Local Forecast - Elevator" by Kevin MacLeod (incompetech.com), licensed under Creative Commons Attribution 4.0, served from `public/hold.mp3` as a Workers static asset.
 - Hard caps: a call ends after `MAX_CALL_SECONDS` (default 600) and at most `MAX_OUTBOUND_PER_DAY` (default 10) outbound calls are placed per calendar day in `TIMEZONE`. Rejected and unauthorized attempts do not count.
 - The bridge speaks every assistant message that lands in the thread after the message it sent. If another agent wakes Axo during a call, that unrelated reply is spoken too.
 
@@ -58,7 +58,8 @@ Plain variables live in `wrangler.toml` and can be changed per deploy:
 | `LANGUAGE` | `en` | `en` or `es`: speech recognition language, voice, fixed phrases, and the language Axo is asked to answer in |
 | `MAX_CALL_SECONDS` | `600` | Hard cap on one call |
 | `MAX_OUTBOUND_PER_DAY` | `10` | Hard cap on outbound calls per day |
-| `HOLD_AFTER_SECONDS` | `6` | Time without a new message from Axo before hold |
+| `HOLD_AFTER_SECONDS` | `6` | Silence from Axo before "One moment." when it has said nothing yet |
+| `HOLD_MUSIC_AFTER_SECONDS` | `15` | Silence from Axo before music starts without a `[hold]` tag |
 | `HOLD_MUSIC_URL` | the Worker's `/hold.mp3` | MP3 or WAV looped during hold; empty disables music |
 | `REPLY_TIMEOUT_SECONDS` | `300` | How long to wait for Axo before giving up |
 | `MAX_SPOKEN_CHARS` | `700` | Longest reply read aloud per message |

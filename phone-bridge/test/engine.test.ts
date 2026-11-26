@@ -258,36 +258,49 @@ describe('inbound: conversation', () => {
     expect(s.sent.at(-1)?.text).toBe('[Phone · Johan] thanks, retry the deploy');
   });
 
-  it('plays hold music while Axo works and cuts it for the next message', async () => {
+  it('puts him on hold right after Axo announces long work and cuts the music for the next message', async () => {
     await s.say('run the full test suite');
-    s.reply('On it, give me a minute.', 'working');
+    s.reply('Let me run the tests. [hold]', 'working');
     await s.tick();
-    await s.spoke();
-    await s.tick(3000);
+    expect(s.spoken().at(-1)).toBe('Let me run the tests.');
     expect(s.log.filter(l => l.startsWith('music'))).toEqual([]);
-    await s.tick(1000);
+    await s.evt('call.speak.ended', { call_control_id: 'c1' });
     expect(s.log.at(-1)).toBe('music c1 https://x/hold.mp3');
     await s.tick(30_000);
     expect(s.log.filter(l => l.startsWith('music'))).toHaveLength(1);
-    s.reply('All 52 tests pass.');
+    s.reply('All 56 tests pass.');
     await s.tick();
-    expect(s.log.slice(-2)).toEqual(['stop c1', 'speak c1 All 52 tests pass.']);
+    expect(s.log.slice(-2)).toEqual(['stop c1', 'speak c1 All 56 tests pass.']);
   });
 
-  it('says one moment before the music when Axo has said nothing yet', async () => {
+  it('plays no music for a quick answer', async () => {
+    await s.say('what time is it');
+    s.reply('Let me check.', 'working');
+    await s.tick();
+    await s.spoke();
+    await s.tick(4000);
+    s.reply('It is seven.');
+    await s.tick();
+    expect(s.log.filter(l => l.startsWith('music'))).toEqual([]);
+  });
+
+  it('falls back to music after a long quiet stretch without the hold tag', async () => {
     await s.say('long question');
     await s.tick(7000);
     expect(s.spoken().at(-1)).toBe('One moment.');
     await s.spoke();
-    await s.tick();
+    await s.tick(5000);
+    expect(s.log.filter(l => l.startsWith('music'))).toEqual([]);
+    await s.tick(1000);
     expect(s.log.at(-1)).toBe('music c1 https://x/hold.mp3');
   });
 
   it('stops the music when he talks during hold', async () => {
     await s.say('long question');
-    await s.tick(7000);
-    await s.spoke();
+    s.reply('Digging in. [hold]', 'working');
     await s.tick();
+    await s.spoke();
+    expect(s.log.at(-1)).toBe('music c1 https://x/hold.mp3');
     await s.hear('actually skip it');
     expect(s.log.at(-1)).toBe('stop c1');
     await s.tick(1000);

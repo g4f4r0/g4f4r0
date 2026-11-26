@@ -13,6 +13,7 @@ export interface Env {
   MAX_CALL_SECONDS?: string;
   MAX_OUTBOUND_PER_DAY?: string;
   HOLD_AFTER_SECONDS?: string;
+  HOLD_MUSIC_AFTER_SECONDS?: string;
   REPLY_TIMEOUT_SECONDS?: string;
   HOLD_MUSIC_URL?: string;
   MAX_SPOKEN_CHARS?: string;
@@ -96,6 +97,7 @@ export interface Config {
   maxCallMs: number;
   maxOutboundPerDay: number;
   holdAfterMs: number;
+  holdMusicAfterMs: number;
   replyTimeoutMs: number;
   holdMusicUrl: string;
   maxSpokenChars: number;
@@ -133,6 +135,7 @@ export function parseConfig(env: Env): Config {
     maxCallMs: int(env.MAX_CALL_SECONDS, 600, 'MAX_CALL_SECONDS') * 1000,
     maxOutboundPerDay: int(env.MAX_OUTBOUND_PER_DAY, 10, 'MAX_OUTBOUND_PER_DAY'),
     holdAfterMs: int(env.HOLD_AFTER_SECONDS, 6, 'HOLD_AFTER_SECONDS') * 1000,
+    holdMusicAfterMs: int(env.HOLD_MUSIC_AFTER_SECONDS, 15, 'HOLD_MUSIC_AFTER_SECONDS') * 1000,
     replyTimeoutMs: int(env.REPLY_TIMEOUT_SECONDS, 300, 'REPLY_TIMEOUT_SECONDS') * 1000,
     holdMusicUrl: env.HOLD_MUSIC_URL ?? '',
     maxSpokenChars: int(env.MAX_SPOKEN_CHARS, 700, 'MAX_SPOKEN_CHARS'),
