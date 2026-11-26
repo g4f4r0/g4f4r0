@@ -57,7 +57,7 @@ Fixed settings (caller name, time zone, voice, speech model, key terms, timings,
 | Variable | Meaning |
 | --- | --- |
 | `CAPY_THREAD_ID` | Thread that receives the calls (GFR-4) |
-| `CAPY_CALL_MODEL_ID` | Model Axo runs on during a call; defaults to Axo's own model |
+| `CAPY_CALL_MODEL_ID` | Model Axo runs on during a call (`openai/gpt-6.2-sol`); defaults to Axo's own model |
 | `CAPY_CALL_REASONING_MODE` | Reasoning during a call, `low` by default; `off` leaves Axo untouched |
 | `CAPY_CALL_FAST_MODE` | `true` uses fast mode during a call when the call model offers it |
 | `CAPY_DEFAULT_MODEL_ID` | Model restored when the call ends; defaults to the thread's last model |
