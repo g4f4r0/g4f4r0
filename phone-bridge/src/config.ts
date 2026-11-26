@@ -13,7 +13,7 @@ export const TELNYX_STT_KEYTERMS = ['Axo', 'Capy', 'Johan', 'g4f4r0', 'Telnyx', 
 export const STRINGS = {
   greeting: 'Hey',
   goodbye: 'Talk soon. Bye.',
-  fillers: ['Mm, let me see.', 'Okay, give me a sec.', 'Hmm, good question.', 'Sure, one sec.', 'Alright, let me check.'],
+  fillers: ['Mm, one sec.', 'Okay, one sec.', 'One moment.'],
   timeLimit: 'This call has reached its time limit. Goodbye.',
   replyTimeout: 'Axo has not answered yet. The answer will be in the thread. Goodbye.',
   failure: 'Something went wrong on my side. Please try again later. Goodbye.',
