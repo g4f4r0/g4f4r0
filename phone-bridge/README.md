@@ -58,7 +58,7 @@ Plain variables live in `wrangler.toml` and can be changed per deploy:
 | `CAPY_THREAD_ID` | GFR-4's id | Thread that receives the calls |
 | `CAPY_DELIVERY` | `interrupt` | How the message reaches a working thread: `interrupt`, `steer` or `queue` |
 | `TIMEZONE` | `Europe/Madrid` | Day boundary for the outbound cap |
-| `VOICE`, `STT_ENGINE`, `STT_MODEL` | per language, `Deepgram`, `nova-3` | Telnyx voice and transcription engine overrides |
+| `VOICE`, `STT_ENGINE`, `STT_MODEL` | per language, `Deepgram`, `deepgram/nova-3` | Telnyx voice and transcription engine overrides |
 | `TELNYX_CONNECTION_ID` | set in `wrangler.toml` | Id of the Telnyx Call Control application (named g4f4r0-axo) the number is assigned to |
 
 ## Secrets
