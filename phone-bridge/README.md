@@ -59,17 +59,18 @@ Plain variables live in `wrangler.toml` and can be changed per deploy:
 | `CAPY_DELIVERY` | `interrupt` | How the message reaches a working thread: `interrupt`, `steer` or `queue` |
 | `TIMEZONE` | `Europe/Madrid` | Day boundary for the outbound cap |
 | `VOICE`, `STT_ENGINE`, `STT_MODEL` | per language, `Deepgram`, `nova-3` | Telnyx voice and transcription engine overrides |
-| `TELNYX_NUMBER`, `TELNYX_CONNECTION_ID` | none | The Telnyx number and Call Control application id; set at deploy time |
+| `TELNYX_CONNECTION_ID` | set in `wrangler.toml` | Id of the Telnyx Call Control application the number is assigned to |
 
 ## Secrets
 
-Set with `wrangler secret put <NAME>` (or through the Cloudflare API). Never commit them.
+Set with `wrangler secret put <NAME>` (or through the Cloudflare API). Never commit them. A secret set before the first deploy is lost, so deploy first.
 
 | Secret | What it is |
 | --- | --- |
 | `TELNYX_API_KEY` | Telnyx API v2 key |
 | `TELNYX_PUBLIC_KEY` | Telnyx account public key (Mission Control, Keys and Credentials, Public Key); base64 Ed25519 |
 | `CAPY_API_KEY` | Capy API key that can write to and read from the HGF-21 thread (Settings, API) |
+| `TELNYX_NUMBER` | The purchased Telnyx number in E.164, used as the caller id of outbound calls |
 | `ALLOWED_CALLER` | Johan's mobile in E.164, the only number that is answered and the number outbound calls go to |
 | `OUTBOUND_TOKEN` | Random bearer token for `POST /call`; generate with `openssl rand -hex 32` |
 
@@ -77,7 +78,7 @@ Set with `wrangler secret put <NAME>` (or through the Cloudflare API). Never com
 
 1. In Telnyx create a Call Control application (webhook API version v2) whose webhook URL is `https://phone-bridge.<account-subdomain>.workers.dev/telnyx/webhook`, and assign the purchased number to it.
 2. `cd phone-bridge && npm install`
-3. Set `TELNYX_NUMBER` and `TELNYX_CONNECTION_ID` in `wrangler.toml` and put the five secrets above with `wrangler secret put`.
+3. Set `TELNYX_CONNECTION_ID` in `wrangler.toml` and put the six secrets above with `wrangler secret put`.
 4. `npm run deploy`
 
 ## Development
