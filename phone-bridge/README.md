@@ -30,7 +30,7 @@ sequenceDiagram
 - If Johan talks over Axo, playback stops, the rest of that reply is dropped, and his words go to Axo. Transcripts that match what the bridge just said are ignored as echo.
 - After `IDLE_SECONDS` of silence Axo is asked to check in; after another `IDLE_SECONDS` it says goodbye and the call hangs up. When a call ends, a `<phone_call event="end">` message with the duration and who hung up is queued in the thread.
 - When Axo works for `HOLD_AFTER_SECONDS` without a new message, the caller hears "One moment." (only if Axo has said nothing yet) and then looping hold music from `HOLD_MUSIC_URL`. The music stops as soon as Axo's next message lands or Johan talks. Without a music URL the bridge says "still working" every 30 seconds instead. After `REPLY_TIMEOUT_SECONDS` with no reply at all the call ends with a note that the answer will be in the thread.
-- The hold music is "A cup of tea" by TAD (CC0, opengameart.org/content/lofi-compilation), served from `public/hold.mp3` as a Workers static asset.
+- The hold music is "The Entertainer" by Scott Joplin, a 1902 piano roll recording in the public domain (Wikimedia Commons), served from `public/hold.mp3` as a Workers static asset.
 - Hard caps: a call ends after `MAX_CALL_SECONDS` (default 600) and at most `MAX_OUTBOUND_PER_DAY` (default 10) outbound calls are placed per calendar day in `TIMEZONE`. Rejected and unauthorized attempts do not count.
 - The bridge speaks every assistant message that lands in the thread after the message it sent. If another agent wakes Axo during a call, that unrelated reply is spoken too.
 
