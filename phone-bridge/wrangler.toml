@@ -24,11 +24,4 @@ CAPY_CALL_REASONING_MODE = "low"
 CAPY_CALL_FAST_MODE = "true"
 CAPY_DEFAULT_MODEL_ID = "anthropic/claude-sonnet-5-5"
 CAPY_DEFAULT_REASONING_MODE = "high"
-
 TELNYX_CONNECTION_ID = "3101835432166425895"
-
-CALL_LANGUAGE = "en"
-CALL_MAX_SECONDS = "600"
-HOLD_MUSIC_URL = "https://g4f4r0-axo.hellogafaro.workers.dev/hold.mp3"
-OUTBOUND_MAX_CALLS_PER_DAY = "10"
-TIMEZONE = "Europe/Madrid"

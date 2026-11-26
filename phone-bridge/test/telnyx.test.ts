@@ -8,7 +8,7 @@ function capture(env: Partial<Env> = {}) {
     requests.push({ url, body: JSON.parse(String(init.body)) });
     return new Response('{"data":{"result":"ok"}}');
   }) as unknown as typeof fetch;
-  const cfg = parseConfig({ ALLOWED_CALLER: '+1', TELNYX_NUMBER: '+2', TELNYX_CONNECTION_ID: 'c', CAPY_THREAD_ID: 't', ...env } as Env);
+  const cfg = parseConfig({ CALLER_PHONE_NUMBER: '+1', TELNYX_PHONE_NUMBER: '+2', TELNYX_CONNECTION_ID: 'c', CAPY_THREAD_ID: 't', ...env } as Env);
   return { telnyx: createTelnyx('key', cfg, fetcher), requests };
 }
 
@@ -29,11 +29,5 @@ describe('telnyx transcription_start', () => {
       },
       transcription_tracks: 'inbound',
     });
-  });
-
-  it('switches the recognition language with CALL_LANGUAGE', async () => {
-    const { telnyx, requests } = capture({ CALL_LANGUAGE: 'es' });
-    await telnyx.startTranscription('x');
-    expect(requests[0].body.transcription_engine_config.language).toBe('es');
   });
 });

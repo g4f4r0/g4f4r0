@@ -24,7 +24,7 @@ function setup(overrides: Partial<Env> = {}) {
   const sent: { text: string; key: string; delivery: string; model?: ModelSelection }[] = [];
   const axo = { queue: [] as CapyMessage[], status: 'working', worked: true, sendFails: 0, readFails: 0, models: { current: 'anthropic/claude-sonnet-5-5' as string | null, fast: ['anthropic/claude-opus-5-5'] }, live: [] as { callId: string; text: string }[], tool: false };
   const clock = { now: Date.UTC(2026, 10, 26, 18, 0) };
-  const env = { HOLD_MUSIC_URL: 'https://x/hold.mp3', ALLOWED_CALLER: ALLOWED, TELNYX_NUMBER: '+13072070207', TELNYX_CONNECTION_ID: 'c', CAPY_THREAD_ID: 'jam_x', ...overrides } as Env;
+  const env = { CALLER_PHONE_NUMBER: ALLOWED, TELNYX_PHONE_NUMBER: '+13072070207', TELNYX_CONNECTION_ID: 'c', CAPY_THREAD_ID: 'jam_x', ...overrides } as Env;
   const cfg = parseConfig(env);
   let m = 0;
   const bridge = new Bridge({
@@ -350,7 +350,7 @@ describe('inbound: conversation', () => {
     expect(s.spoken().at(-1)).toBe('Let me run the tests.');
     expect(s.log.filter(l => l.startsWith('music'))).toEqual([]);
     await s.evt('call.speak.ended', { call_control_id: 'c1' });
-    expect(s.log.at(-1)).toBe('music c1 https://x/hold.mp3');
+    expect(s.log.at(-1)).toBe('music c1 https://g4f4r0-axo.hellogafaro.workers.dev/hold.mp3');
     await s.tick(30_000);
     expect(s.log.filter(l => l.startsWith('music'))).toHaveLength(1);
     s.reply('All 56 tests pass.');
@@ -377,7 +377,7 @@ describe('inbound: conversation', () => {
     await s.tick(5000);
     expect(s.log.filter(l => l.startsWith('music'))).toEqual([]);
     await s.tick(1000);
-    expect(s.log.at(-1)).toBe('music c1 https://x/hold.mp3');
+    expect(s.log.at(-1)).toBe('music c1 https://g4f4r0-axo.hellogafaro.workers.dev/hold.mp3');
   });
 
   it('stops the music when he talks during hold', async () => {
@@ -385,7 +385,7 @@ describe('inbound: conversation', () => {
     s.reply('Digging in. [hold]', 'working');
     await s.tick();
     await s.spoke();
-    expect(s.log.at(-1)).toBe('music c1 https://x/hold.mp3');
+    expect(s.log.at(-1)).toBe('music c1 https://g4f4r0-axo.hellogafaro.workers.dev/hold.mp3');
     await s.hear('actually skip it');
     expect(s.log.at(-1)).toBe('stop c1');
     await s.tick(1000);
@@ -539,26 +539,6 @@ describe('call model', () => {
   });
 });
 
-describe('config', () => {
-  it('uses the configured call length', async () => {
-    const s = setup({ CALL_MAX_SECONDS: '30' });
-    await s.pickUp();
-    await s.tick(20_000);
-    expect(s.spoken().some(t => t.includes('time limit'))).toBe(false);
-    await s.tick(11_000);
-    expect(s.spoken().some(t => t.includes('time limit'))).toBe(true);
-  });
-
-  it('speaks and asks for Spanish when configured', async () => {
-    const s = setup({ CALL_LANGUAGE: 'es' });
-    await s.ring();
-    expect(s.sent[0].text).toContain('spoken to him in Spanish');
-    await s.tick(20_000);
-    await s.evt('call.answered', { call_control_id: 'c1', from: ALLOWED, client_state: encodeState({ k: 'in' }) });
-    expect(s.spoken()).toEqual(['Hola Johan.']);
-  });
-});
-
 describe('outbound calls', () => {
   it('dials, speaks the alert and hangs up when no reply is wanted, without writing to the thread', async () => {
     const s = setup();
@@ -578,14 +558,6 @@ describe('outbound calls', () => {
     expect(s.sent[0].text).toMatch(/^\[Channel: Phone call\] \[Event: Outgoing call\] \[To: Johan\] /);
     expect(s.sent[0].text).toContain('You phoned Johan to tell him: "Build failed"');
     expect(s.sent[0].text).toMatch(/\n\[Channel: Phone call\] \[From: Johan\] retry it$/);
-  });
-
-  it('enforces the daily cap and never dials past it', async () => {
-    const s = setup({ OUTBOUND_MAX_CALLS_PER_DAY: '3' });
-    const results = [];
-    for (let i = 0; i < 5; i++) results.push((await s.bridge.placeOutbound('hi', false)).ok);
-    expect(results).toEqual([true, true, true, false, false]);
-    expect(s.log.filter(l => l.startsWith('dial'))).toHaveLength(3);
   });
 
   it('defaults to 10 outbound calls per day', async () => {

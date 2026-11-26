@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { createCapy, parseFrames } from '../src/capy';
 import { parseConfig, type Env } from '../src/config';
 
-const cfg = parseConfig({ ALLOWED_CALLER: '+1', TELNYX_NUMBER: '+2', TELNYX_CONNECTION_ID: 'c', CAPY_THREAD_ID: 'jam_t' } as Env);
+const cfg = parseConfig({ CALLER_PHONE_NUMBER: '+1', TELNYX_PHONE_NUMBER: '+2', TELNYX_CONNECTION_ID: 'c', CAPY_THREAD_ID: 'jam_t' } as Env);
 
 describe('capy send', () => {
   it('retries once with the same client key when Capy answers 5xx', async () => {

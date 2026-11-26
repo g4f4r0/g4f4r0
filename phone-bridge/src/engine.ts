@@ -72,7 +72,6 @@ export interface TelnyxEvent {
 export type OutboundResult = { ok: true; callControlId: string } | { ok: false; reason: 'cap' | 'telnyx' };
 
 const BYE_GRACE_MS = 10_000;
-const STILL_WORKING_EVERY_MS = 30_000;
 const SPEAK_STUCK_MS = 60_000;
 const STOP_WORDS = new Set(['stop', 'wait', 'no', 'nope', 'sorry', 'hey', 'actually', 'hold']);
 const SENTENCE_END = /[.!?…](?=\s|$)/g;
@@ -169,7 +168,7 @@ export class Bridge {
       call.speaking = Math.max(0, call.speaking - 1);
       if (call.speaking) call.quietUntil = Math.max(call.quietUntil, now + 3000);
       if (!call.speaking) call.lastActivityAt = now;
-      const startMusic = !call.speaking && call.waiting?.holdAsked && !call.waiting.music && cfg.holdMusicUrl;
+      const startMusic = !call.speaking && call.waiting?.holdAsked && !call.waiting.music;
       if (startMusic && call.waiting) call.waiting.music = true;
       store.putCall(call);
       if (startMusic) await telnyx.playMusic(id, cfg.holdMusicUrl);
@@ -510,16 +509,13 @@ export class Bridge {
     const quietFor = later - fw.lastItemAt;
     const filler = fw.spoken === 0 && fw.lastHoldAt === 0 && (window.toolStarted || quietFor >= cfg.holdAfterMs);
     if (fresh.answered && !fresh.speaking && !fw.music) {
-      if (cfg.holdMusicUrl && (fw.holdAsked || quietFor >= cfg.holdMusicAfterMs)) {
+      if (fw.holdAsked || quietFor >= cfg.holdMusicAfterMs) {
         fw.music = true;
         store.putCall(fresh);
         await telnyx.playMusic(fresh.id, cfg.holdMusicUrl);
       } else if (filler) {
         fw.lastHoldAt = later;
         await this.say(fresh, strings.fillers[call.turns % strings.fillers.length]);
-      } else if (!cfg.holdMusicUrl && fw.lastHoldAt !== 0 && later - fw.lastHoldAt >= STILL_WORKING_EVERY_MS) {
-        fw.lastHoldAt = later;
-        await this.say(fresh, strings.stillWorking);
       }
     }
     store.putCall(fresh);
