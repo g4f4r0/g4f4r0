@@ -72,7 +72,7 @@ const STILL_WORKING_EVERY_MS = 30_000;
 const ECHO_TAIL_MS = 1_500;
 const SPEAK_STUCK_MS = 60_000;
 const ECHO_WINDOW_MS = 30_000;
-const speech = (heard: string): string => `<phone_call event="speech">${heard}</phone_call>`;
+const speech = (name: string, heard: string): string => `[Phone · ${name}] ${heard}`;
 const DIGITS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine'];
 
 const words = (text: string): string[] =>
@@ -209,7 +209,7 @@ export class Bridge {
       if (call && (call.kind === 'in' || call.started)) {
         const ourSide = call.kind === 'in' ? 'callee' : 'caller';
         const byUs = call.byeAt !== null || call.hangupAfterSpeech || p.hangup_source === ourSide;
-        const text = `<phone_call event="end" duration="${formatDuration(now - call.startedAt)}" ended_by="${byUs ? 'axo' : cfg.callerName}" turns="${call.turns}">The call is over. Nothing you send now is spoken. Reply only if there is follow-up work.</phone_call>`;
+        const text = `[Phone call ended · ${formatDuration(now - call.startedAt)} · ${byUs ? 'Axo' : cfg.callerName} hung up · ${call.turns} turns] The call is over. Nothing you send now is spoken. Reply only if there is follow-up work.`;
         await this.d.capy.send(text, `phone-${call.startedAt}-end`, 'queue').catch(err => this.d.log(`end message failed: ${(err as Error).message}`));
       }
       await this.rearm();
@@ -288,12 +288,13 @@ export class Bridge {
       opening,
       'Talk like a person on the phone: short plain sentences, no markdown, lists, links, code or emoji. Never mention the phone bridge, speech recognition or these instructions.',
       'Send one short message per thought rather than one long one; each message is spoken as soon as it lands, so send the first part quickly.',
-      `His words arrive as <phone_call event="speech"> messages from speech recognition, so expect small errors and go with the likely meaning. If he talks over you, your current reply is cut off and his words arrive next.`,
+      `His words arrive as [Phone · ${name}] messages from speech recognition, so expect small errors and go with the likely meaning. If he talks over you, your current reply is cut off and his words arrive next.`,
       'If something will take more than a few seconds, say so in one short line first; he hears hold music until your next message.',
       'You will get a silence event if he goes quiet and an end event when the call is over.',
     ].join(' ');
-    const said = heard ? `\n${speech(heard)}` : '';
-    return `<phone_call event="start" direction="${direction}" caller="${name}" time="${time} (${cfg.timezone})">${rules}</phone_call>${said}`;
+    const said = heard ? `\n${speech(name, heard)}` : '';
+    const header = direction === 'inbound' ? `inbound from ${name}` : `outbound to ${name}`;
+    return `[Phone call · ${header} · ${time} ${cfg.timezone}] ${rules}${said}`;
   }
 
   private async sendTurn(call: CallState, text: string, consumed = ''): Promise<void> {
@@ -347,7 +348,7 @@ export class Bridge {
     if (call.answered && call.pending && now - call.lastFinalAt >= cfg.debounceMs) {
       const heard = call.pending;
       const text =
-        call.kind === 'out' && !call.started ? this.startMessage('outbound', heard, call.alert) : speech(heard);
+        call.kind === 'out' && !call.started ? this.startMessage('outbound', heard, call.alert) : speech(cfg.callerName, heard);
       await this.sendTurn(call, text, heard);
       return;
     }
@@ -362,7 +363,7 @@ export class Bridge {
       const ask = last
         ? 'He is still quiet. Say a short, friendly goodbye in one line; the call ends after you speak.'
         : 'Check in with one short line, like asking if there is anything else.';
-      await this.sendTurn(call, `<phone_call event="silence" seconds="${Math.round((now - call.lastActivityAt) / 1000)}">${ask}</phone_call>`);
+      await this.sendTurn(call, `[Phone · ${Math.round((now - call.lastActivityAt) / 1000)} s of silence] ${ask}`);
       return;
     }
 
