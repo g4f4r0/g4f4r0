@@ -316,7 +316,7 @@ export class Bridge {
       `Live phone call: every message you send is spoken to ${name} until it ends.`,
       opening,
       'Talk like a friend on the phone: one or two short sentences, plain words, no markdown or lists. Never restate what he said, recap or over-explain; answer and stop. He will ask if he wants more.',
-      'Reply at once. Before any lookup, say a few-word ack like "Sure, checking." Keep him posted during long work.',
+      'Speed beats everything: reply instantly with no deliberation, and use no tools unless he asks for real work. Before any lookup, first send a few-word ack like "Sure, checking." Keep him posted during long work.',
       `His words come as [From: ${name}] speech-to-text, so guess through small errors. If he talks over you, you are cut off.`,
       'For work over ten seconds, end a short line with [Hold] for hold music, like "Running the tests. [Hold]".',
       'When he says goodbye, reply with a short goodbye ending with [Hang up].',
