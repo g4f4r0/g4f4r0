@@ -1,4 +1,4 @@
-# phone-bridge
+# phone-bridge (Worker g4f4r0-axo)
 
 A Cloudflare Worker and Durable Object that lets Johan talk to Axo (thread GFR-4) by phone, and lets Axo phone Johan.
 Telnyx Call Control does the audio (speech to text and text to speech), so the Worker only handles HTTPS webhooks. Every turn of a call is a message in the Capy thread, so the thread is the call history.
@@ -31,7 +31,7 @@ sequenceDiagram
 ## Outbound calls (how Axo phones Johan)
 
 ```bash
-curl -X POST https://phone-bridge.<account-subdomain>.workers.dev/call \
+curl -X POST https://g4f4r0-axo.<account-subdomain>.workers.dev/call \
   -H "Authorization: Bearer $OUTBOUND_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"text": "The nightly backup failed twice.", "listen": true}'
@@ -59,7 +59,7 @@ Plain variables live in `wrangler.toml` and can be changed per deploy:
 | `CAPY_DELIVERY` | `interrupt` | How the message reaches a working thread: `interrupt`, `steer` or `queue` |
 | `TIMEZONE` | `Europe/Madrid` | Day boundary for the outbound cap |
 | `VOICE`, `STT_ENGINE`, `STT_MODEL` | per language, `Deepgram`, `nova-3` | Telnyx voice and transcription engine overrides |
-| `TELNYX_CONNECTION_ID` | set in `wrangler.toml` | Id of the Telnyx Call Control application the number is assigned to |
+| `TELNYX_CONNECTION_ID` | set in `wrangler.toml` | Id of the Telnyx Call Control application (named g4f4r0-axo) the number is assigned to |
 
 ## Secrets
 
@@ -76,7 +76,7 @@ Set with `wrangler secret put <NAME>` (or through the Cloudflare API). Never com
 
 ## Setup and deploy
 
-1. In Telnyx create a Call Control application (webhook API version v2) whose webhook URL is `https://phone-bridge.<account-subdomain>.workers.dev/telnyx/webhook`, and assign the purchased number to it.
+1. In Telnyx create a Call Control application (webhook API version v2) whose webhook URL is `https://g4f4r0-axo.<account-subdomain>.workers.dev/telnyx/webhook`, and assign the purchased number to it.
 2. `cd phone-bridge && npm install`
 3. Set `TELNYX_CONNECTION_ID` in `wrangler.toml` and put the six secrets above with `wrangler secret put`.
 4. `npm run deploy`
