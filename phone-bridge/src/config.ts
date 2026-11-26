@@ -123,7 +123,7 @@ export function parseConfig(env: Env): Config {
     maxSpokenChars: int(env.MAX_SPOKEN_CHARS, 700, 'MAX_SPOKEN_CHARS'),
     voice: env.VOICE ?? language.voice,
     sttEngine: env.STT_ENGINE ?? 'Deepgram',
-    sttModel: env.STT_MODEL ?? 'nova-3',
+    sttModel: env.STT_MODEL ?? 'deepgram/nova-3',
     timezone: env.TIMEZONE ?? 'Europe/Madrid',
     debounceMs: 1500,
     pollMs: 2000,
