@@ -42,12 +42,12 @@ describe('capy model selection', () => {
     expect(bodies.map(b => b.model?.reasoningMode ?? null)).toEqual(['low', null]);
   });
 
-  it('reads the thread model and whether it offers fast mode', async () => {
+  it('reads the thread model and which models offer fast mode', async () => {
     const fetcher = (async (url: string) =>
       url.endsWith('/models')
         ? Response.json({ items: [{ id: 'anthropic/claude-opus-5-5', fast: true }, { id: 'anthropic/claude-sonnet-5-5', fast: false }] })
         : Response.json({ id: 'jam_t', lastModelId: 'anthropic/claude-opus-5-5' })) as unknown as typeof fetch;
-    expect(await createCapy('k', cfg, fetcher).currentModel()).toEqual({ modelId: 'anthropic/claude-opus-5-5', fast: true });
+    expect(await createCapy('k', cfg, fetcher).readModels()).toEqual({ current: 'anthropic/claude-opus-5-5', fast: ['anthropic/claude-opus-5-5'] });
   });
 });
 

@@ -1,5 +1,5 @@
 import type { Config } from './config';
-import type { CapyApi, CurrentModel, ModelSelection } from './capy';
+import type { CapyApi, ModelSelection } from './capy';
 import type { TelnyxApi } from './telnyx';
 import { decodeState } from './telnyx';
 import { dayKey, isAllowedCaller, reserveOutbound, type CountStore } from './guards';
@@ -39,7 +39,7 @@ export interface CallState {
   recent: { text: string; at: number }[];
   lastActivityAt: number;
   idlePrompts: number;
-  model: CurrentModel | null;
+  model: { call: ModelSelection; restore: ModelSelection } | null;
   modelChecked: boolean;
 }
 
@@ -315,9 +315,26 @@ export class Bridge {
     const { cfg, store } = this.d;
     store.deleteCall(call.id);
     if (call.kind === 'out' && !call.started) return;
-    const restore: ModelSelection | undefined = call.model ? { modelId: call.model.modelId, reasoningMode: cfg.axoReasoning } : undefined;
     const text = `[Channel: Phone call] [Event: Call ended] [Duration: ${formatDuration(this.d.now() - call.startedAt)}] [Ended by: ${byUs ? 'Axo' : cfg.callerName}] The call is over. Nothing you send now is spoken. Reply only if there is follow-up work.`;
-    await this.d.capy.send(text, `phone-${call.startedAt}-end`, 'queue', restore).catch(err => this.d.log(`end message failed: ${(err as Error).message}`));
+    await this.d.capy.send(text, `phone-${call.startedAt}-end`, 'queue', call.model?.restore).catch(err => this.d.log(`end message failed: ${(err as Error).message}`));
+  }
+
+  private async callModels(): Promise<{ call: ModelSelection; restore: ModelSelection } | null> {
+    const { cfg, capy } = this.d;
+    try {
+      const models = await capy.readModels();
+      const axoModel = cfg.axoModel ?? models.current;
+      if (!axoModel || !cfg.callReasoning) return null;
+      const modelId = cfg.callModel ?? axoModel;
+      const fast = cfg.callFast && models.fast.includes(modelId);
+      return {
+        call: { modelId, reasoningMode: cfg.callReasoning, ...(fast ? { modes: { fast: true } } : {}) },
+        restore: { modelId: axoModel, reasoningMode: cfg.axoReasoning },
+      };
+    } catch (err) {
+      this.d.log(`reading Axo's model failed: ${(err as Error).message}`);
+      return null;
+    }
   }
 
   private async sendTurn(call: CallState, text: string, consumed = ''): Promise<void> {
@@ -325,13 +342,10 @@ export class Bridge {
     call.turns++;
     if (!call.started) text = this.startMessage(call.kind === 'in' ? 'inbound' : 'outbound', text, call.alert);
     if (!call.modelChecked && cfg.callReasoning) {
-      call.model = await capy.currentModel().catch(err => (this.d.log(`reading Axo's model failed: ${(err as Error).message}`), null));
+      call.model = await this.callModels();
       call.modelChecked = true;
     }
-    const model: ModelSelection | undefined = call.model
-      ? { modelId: call.model.modelId, reasoningMode: cfg.callReasoning ?? undefined, ...(call.model.fast ? { modes: { fast: true } } : {}) }
-      : undefined;
-    const sentId = await capy.send(text, `phone-${call.startedAt}-${call.turns}`, 'interrupt', model);
+    const sentId = await capy.send(text, `phone-${call.startedAt}-${call.turns}`, 'interrupt', call.model?.call);
     const fresh = this.d.store.getCall(call.id) ?? call;
     fresh.turns = call.turns;
     fresh.started = true;

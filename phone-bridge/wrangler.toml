@@ -18,6 +18,11 @@ tag = "v1"
 new_sqlite_classes = ["PhoneBridge"]
 
 [vars]
+CALL_MODEL = "anthropic/claude-opus-5-5"
+CALL_REASONING = "low"
+CALL_FAST = "true"
+AXO_MODEL = "anthropic/claude-sonnet-5-5"
+AXO_REASONING = "high"
 LANGUAGE = "en"
 MAX_CALL_SECONDS = "600"
 MAX_OUTBOUND_PER_DAY = "10"

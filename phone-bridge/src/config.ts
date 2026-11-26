@@ -16,7 +16,10 @@ export interface Env {
   HOLD_MUSIC_AFTER_SECONDS?: string;
   REPLY_TIMEOUT_SECONDS?: string;
   HOLD_MUSIC_URL?: string;
+  CALL_MODEL?: string;
   CALL_REASONING?: string;
+  CALL_FAST?: string;
+  AXO_MODEL?: string;
   AXO_REASONING?: string;
   MAX_SPOKEN_CHARS?: string;
   IDLE_SECONDS?: string;
@@ -102,7 +105,10 @@ export interface Config {
   holdMusicAfterMs: number;
   replyTimeoutMs: number;
   holdMusicUrl: string;
+  callModel: string | null;
   callReasoning: string | null;
+  callFast: boolean;
+  axoModel: string | null;
   axoReasoning: string;
   maxSpokenChars: number;
   idleMs: number;
@@ -150,6 +156,9 @@ export function parseConfig(env: Env): Config {
     holdMusicAfterMs: int(env.HOLD_MUSIC_AFTER_SECONDS, 15, 'HOLD_MUSIC_AFTER_SECONDS') * 1000,
     replyTimeoutMs: int(env.REPLY_TIMEOUT_SECONDS, 300, 'REPLY_TIMEOUT_SECONDS') * 1000,
     holdMusicUrl: env.HOLD_MUSIC_URL ?? '',
+    callModel: env.CALL_MODEL?.trim() || null,
+    callFast: env.CALL_FAST !== 'false',
+    axoModel: env.AXO_MODEL?.trim() || null,
     callReasoning: env.CALL_REASONING === 'off' ? null : reasoning(env.CALL_REASONING, 'low', 'CALL_REASONING'),
     axoReasoning: reasoning(env.AXO_REASONING, 'high', 'AXO_REASONING'),
     maxSpokenChars: int(env.MAX_SPOKEN_CHARS, 700, 'MAX_SPOKEN_CHARS'),

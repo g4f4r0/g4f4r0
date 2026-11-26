@@ -27,14 +27,14 @@ export interface ModelSelection {
   modes?: { fast?: boolean };
 }
 
-export interface CurrentModel {
-  modelId: string;
-  fast: boolean;
+export interface Models {
+  current: string | null;
+  fast: string[];
 }
 
 export interface CapyApi {
   send(text: string, clientKey: string, delivery?: 'interrupt' | 'queue', model?: ModelSelection): Promise<string>;
-  currentModel(): Promise<CurrentModel | null>;
+  readModels(): Promise<Models>;
   readReplies(afterId: string, windowMs: number): Promise<ReplyWindow>;
 }
 
@@ -80,17 +80,18 @@ export function createCapy(apiKey: string, cfg: Config, fetcher: typeof fetch = 
       return ((await res.json()) as { id: string }).id;
     },
 
-    currentModel: async () => {
+    readModels: async () => {
       const get = async (path: string) => {
         const res = await fetcher(path, { headers, signal: AbortSignal.timeout(SEND_TIMEOUT_MS) });
         if (!res.ok) throw new Error(`capy ${path} failed with ${res.status}`);
         return res.json() as Promise<any>;
       };
       const [thread, models] = await Promise.all([get(url('')), get(`${cfg.capyBase}/models`)]);
-      const modelId = typeof thread?.lastModelId === 'string' ? thread.lastModelId : null;
-      if (!modelId) return null;
       const list: any[] = Array.isArray(models) ? models : (models?.items ?? []);
-      return { modelId, fast: list.some(m => m?.id === modelId && m?.fast === true) };
+      return {
+        current: typeof thread?.lastModelId === 'string' ? thread.lastModelId : null,
+        fast: list.filter(m => m?.fast === true && typeof m.id === 'string').map(m => m.id),
+      };
     },
 
     readReplies: async (afterId, windowMs) => {

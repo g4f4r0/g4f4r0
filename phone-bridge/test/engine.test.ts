@@ -22,7 +22,7 @@ function setup(overrides: Partial<Env> = {}) {
   };
   const log: string[] = [];
   const sent: { text: string; key: string; delivery: string; model?: ModelSelection }[] = [];
-  const axo = { queue: [] as CapyMessage[], status: 'working', worked: true, sendFails: 0, readFails: 0, model: { modelId: 'anthropic/claude-sonnet-5-5', fast: false } as { modelId: string; fast: boolean } | null, live: [] as { callId: string; text: string }[], tool: false };
+  const axo = { queue: [] as CapyMessage[], status: 'working', worked: true, sendFails: 0, readFails: 0, models: { current: 'anthropic/claude-sonnet-5-5' as string | null, fast: ['anthropic/claude-opus-5-5'] }, live: [] as { callId: string; text: string }[], tool: false };
   const clock = { now: Date.UTC(2026, 10, 26, 18, 0) };
   const env = { HOLD_MUSIC_URL: 'https://x/hold.mp3', ALLOWED_CALLER: ALLOWED, TELNYX_NUMBER: '+13072070207', TELNYX_CONNECTION_ID: 'c', CAPY_THREAD_ID: 'jam_x', ...overrides } as Env;
   const cfg = parseConfig(env);
@@ -44,7 +44,7 @@ function setup(overrides: Partial<Env> = {}) {
       dial: async s => (log.push(`dial ${JSON.stringify(s)}`), 'out-1'),
     },
     capy: {
-      currentModel: async () => axo.model,
+      readModels: async () => axo.models,
       send: async (text, key, delivery = 'interrupt', model) => {
         if (axo.sendFails > 0 && axo.sendFails--) throw new Error('capy down');
         sent.push({ text, key, delivery, model });
@@ -509,16 +509,26 @@ describe('inbound: silence and hang up', () => {
 });
 
 describe('call model', () => {
-  it('turns on fast mode when Axo\'s model offers it', async () => {
-    const s = setup();
-    s.axo.model = { modelId: 'anthropic/claude-opus-5-5', fast: true };
+  it('switches to the configured call model with fast mode when offered, and restores Axo\'s own model', async () => {
+    const s = setup({ CALL_MODEL: 'anthropic/claude-opus-5-5' });
     await s.ring();
     expect(s.sent[0].model).toEqual({ modelId: 'anthropic/claude-opus-5-5', reasoningMode: 'low', modes: { fast: true } });
+    await s.evt('call.hangup', { call_control_id: 'c1', hangup_source: 'caller' });
+    expect(s.sent.at(-1)?.model).toEqual({ modelId: 'anthropic/claude-sonnet-5-5', reasoningMode: 'high' });
+  });
+
+  it('skips fast mode when the model does not offer it or CALL_FAST is false', async () => {
+    const s = setup({ CALL_MODEL: 'anthropic/claude-haiku-5-5' });
+    await s.ring();
+    expect(s.sent[0].model).toEqual({ modelId: 'anthropic/claude-haiku-5-5', reasoningMode: 'low' });
+    const n = setup({ CALL_MODEL: 'anthropic/claude-opus-5-5', CALL_FAST: 'false' });
+    await n.ring();
+    expect(n.sent[0].model).toEqual({ modelId: 'anthropic/claude-opus-5-5', reasoningMode: 'low' });
   });
 
   it('leaves the model alone when it cannot read it or when switched off', async () => {
     const s = setup();
-    s.axo.model = null;
+    s.axo.models = { current: null, fast: [] };
     await s.ring();
     expect(s.sent[0].model).toBeUndefined();
     await s.evt('call.hangup', { call_control_id: 'c1', hangup_source: 'caller' });
