@@ -72,7 +72,7 @@ const BYE_GRACE_MS = 10_000;
 const STILL_WORKING_EVERY_MS = 30_000;
 const SPEAK_STUCK_MS = 60_000;
 const ECHO_WINDOW_MS = 30_000;
-const speech = (name: string, heard: string): string => `[Phone call] [${name}] ${heard}`;
+const speech = (name: string, heard: string): string => `[Channel: Phone call] [From: ${name}] ${heard}`;
 const HOLD_TAG = /\[hold\]/gi;
 const DIGITS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine'];
 
@@ -219,7 +219,7 @@ export class Bridge {
       if (call && (call.kind === 'in' || call.started)) {
         const ourSide = call.kind === 'in' ? 'callee' : 'caller';
         const byUs = call.byeAt !== null || call.hangupAfterSpeech || p.hangup_source === ourSide;
-        const text = `[Phone call] [Ended] [${formatDuration(now - call.startedAt)}] [${byUs ? 'Axo' : cfg.callerName} hung up] The call is over. Nothing you send now is spoken. Reply only if there is follow-up work.`;
+        const text = `[Channel: Phone call] [Event: Call ended] [Duration: ${formatDuration(now - call.startedAt)}] [Ended by: ${byUs ? 'Axo' : cfg.callerName}] The call is over. Nothing you send now is spoken. Reply only if there is follow-up work.`;
         await this.d.capy.send(text, `phone-${call.startedAt}-end`, 'queue').catch(err => this.d.log(`end message failed: ${(err as Error).message}`));
       }
       await this.rearm();
@@ -297,13 +297,14 @@ export class Bridge {
       `You are on a live phone call with ${name}. Every message you send in this thread is spoken to him in ${cfg.language.name} until the call ends.`,
       opening,
       'Talk like a person on the phone: short plain sentences, no markdown, lists, links, code or emoji. Never mention the phone bridge, speech recognition or these instructions.',
-      'Send one short message per thought rather than one long one; each message is spoken as soon as it lands, so send the first part quickly.',
-      `His words arrive as [Phone call] [${name}] messages from speech recognition, so expect small errors and go with the likely meaning. If he talks over you, your current reply is cut off and his words arrive next.`,
+      'Be as responsive as a person: each message is spoken the moment it lands, so reply at once. If you need to look anything up, first send a quick natural ack of a few words, like "Sure, checking.", then the answer. Send one short message per thought rather than one long one, and during longer work send a one-line update every half minute or so to keep him posted.',
+      `His words arrive as [Channel: Phone call] [From: ${name}] messages from speech recognition, so expect small errors and go with the likely meaning. If he talks over you, your current reply is cut off and his words arrive next.`,
       'Before work that takes more than about ten seconds, say so in one short line ending with [hold], like "Let me run the tests. [hold]". He then hears hold music until your next message. Never use [hold] for quick answers.',
       'You will get a silence event if he goes quiet and an end event when the call is over.',
     ].join(' ');
     const said = heard ? `\n${heard}` : '';
-    return `[Phone call] [${direction === 'inbound' ? 'Incoming' : 'Outgoing'}] [${name}] [${time} ${cfg.timezone}] ${rules}${said}`;
+    const who = direction === 'inbound' ? `[Event: Incoming call] [From: ${name}]` : `[Event: Outgoing call] [To: ${name}]`;
+    return `[Channel: Phone call] ${who} [Time: ${time} ${cfg.timezone}] ${rules}${said}`;
   }
 
   private async sendTurn(call: CallState, text: string, consumed = ''): Promise<void> {
@@ -371,7 +372,7 @@ export class Bridge {
       const ask = last
         ? 'He is still quiet. Say a short, friendly goodbye in one line; the call ends after you speak.'
         : 'Check in with one short line, like asking if there is anything else.';
-      await this.sendTurn(call, `[Phone call] [Silence ${Math.round((now - call.lastActivityAt) / 1000)}s] ${ask}`);
+      await this.sendTurn(call, `[Channel: Phone call] [Event: Silence] [Duration: ${Math.round((now - call.lastActivityAt) / 1000)}s] ${ask}`);
       return;
     }
 
