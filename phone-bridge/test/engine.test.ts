@@ -510,18 +510,18 @@ describe('inbound: silence and hang up', () => {
 
 describe('call model', () => {
   it('switches to the configured call model with fast mode when offered, and restores Axo\'s own model', async () => {
-    const s = setup({ CALL_MODEL: 'anthropic/claude-opus-5-5' });
+    const s = setup({ CAPY_CALL_MODEL_ID: 'anthropic/claude-opus-5-5' });
     await s.ring();
     expect(s.sent[0].model).toEqual({ modelId: 'anthropic/claude-opus-5-5', reasoningMode: 'low', modes: { fast: true } });
     await s.evt('call.hangup', { call_control_id: 'c1', hangup_source: 'caller' });
     expect(s.sent.at(-1)?.model).toEqual({ modelId: 'anthropic/claude-sonnet-5-5', reasoningMode: 'high' });
   });
 
-  it('skips fast mode when the model does not offer it or CALL_FAST is false', async () => {
-    const s = setup({ CALL_MODEL: 'anthropic/claude-haiku-5-5' });
+  it('skips fast mode when the model does not offer it or CAPY_CALL_FAST_MODE is false', async () => {
+    const s = setup({ CAPY_CALL_MODEL_ID: 'anthropic/claude-haiku-5-5' });
     await s.ring();
     expect(s.sent[0].model).toEqual({ modelId: 'anthropic/claude-haiku-5-5', reasoningMode: 'low' });
-    const n = setup({ CALL_MODEL: 'anthropic/claude-opus-5-5', CALL_FAST: 'false' });
+    const n = setup({ CAPY_CALL_MODEL_ID: 'anthropic/claude-opus-5-5', CAPY_CALL_FAST_MODE: 'false' });
     await n.ring();
     expect(n.sent[0].model).toEqual({ modelId: 'anthropic/claude-opus-5-5', reasoningMode: 'low' });
   });
@@ -533,7 +533,7 @@ describe('call model', () => {
     expect(s.sent[0].model).toBeUndefined();
     await s.evt('call.hangup', { call_control_id: 'c1', hangup_source: 'caller' });
     expect(s.sent.at(-1)?.model).toBeUndefined();
-    const off = setup({ CALL_REASONING: 'off' });
+    const off = setup({ CAPY_CALL_REASONING_MODE: 'off' });
     await off.ring();
     expect(off.sent[0].model).toBeUndefined();
   });
@@ -541,7 +541,7 @@ describe('call model', () => {
 
 describe('config', () => {
   it('uses the configured call length', async () => {
-    const s = setup({ MAX_CALL_SECONDS: '30' });
+    const s = setup({ CALL_MAX_SECONDS: '30' });
     await s.pickUp();
     await s.tick(20_000);
     expect(s.spoken().some(t => t.includes('time limit'))).toBe(false);
@@ -550,7 +550,7 @@ describe('config', () => {
   });
 
   it('speaks and asks for Spanish when configured', async () => {
-    const s = setup({ LANGUAGE: 'es' });
+    const s = setup({ CALL_LANGUAGE: 'es' });
     await s.ring();
     expect(s.sent[0].text).toContain('spoken to him in Spanish');
     await s.tick(20_000);
@@ -581,7 +581,7 @@ describe('outbound calls', () => {
   });
 
   it('enforces the daily cap and never dials past it', async () => {
-    const s = setup({ MAX_OUTBOUND_PER_DAY: '3' });
+    const s = setup({ OUTBOUND_MAX_CALLS_PER_DAY: '3' });
     const results = [];
     for (let i = 0; i < 5; i++) results.push((await s.bridge.placeOutbound('hi', false)).ok);
     expect(results).toEqual([true, true, true, false, false]);

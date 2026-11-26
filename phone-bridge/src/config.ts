@@ -9,26 +9,26 @@ export interface Env {
   TELNYX_CONNECTION_ID: string;
   CAPY_THREAD_ID: string;
   CAPY_API_BASE?: string;
-  LANGUAGE?: string;
-  MAX_CALL_SECONDS?: string;
-  MAX_OUTBOUND_PER_DAY?: string;
-  HOLD_AFTER_SECONDS?: string;
+  CALL_LANGUAGE?: string;
+  CALL_MAX_SECONDS?: string;
+  OUTBOUND_MAX_CALLS_PER_DAY?: string;
+  HOLD_FILLER_AFTER_SECONDS?: string;
   HOLD_MUSIC_AFTER_SECONDS?: string;
-  REPLY_TIMEOUT_SECONDS?: string;
+  CALL_REPLY_TIMEOUT_SECONDS?: string;
   HOLD_MUSIC_URL?: string;
-  CALL_MODEL?: string;
-  CALL_REASONING?: string;
-  CALL_FAST?: string;
-  AXO_MODEL?: string;
-  AXO_REASONING?: string;
-  MAX_SPOKEN_CHARS?: string;
-  IDLE_SECONDS?: string;
-  GREETING_TIMEOUT_SECONDS?: string;
+  CAPY_CALL_MODEL_ID?: string;
+  CAPY_CALL_REASONING_MODE?: string;
+  CAPY_CALL_FAST_MODE?: string;
+  CAPY_DEFAULT_MODEL_ID?: string;
+  CAPY_DEFAULT_REASONING_MODE?: string;
+  CALL_MAX_SPOKEN_CHARS?: string;
+  CALL_IDLE_SECONDS?: string;
+  CALL_GREETING_TIMEOUT_SECONDS?: string;
   CALLER_NAME?: string;
-  KEYTERMS?: string;
-  VOICE?: string;
-  STT_ENGINE?: string;
-  STT_MODEL?: string;
+  TELNYX_STT_KEYTERMS?: string;
+  TELNYX_VOICE?: string;
+  TELNYX_STT_ENGINE?: string;
+  TELNYX_STT_MODEL?: string;
   TIMEZONE?: string;
 }
 
@@ -141,8 +141,8 @@ const reasoning = (raw: string | undefined, fallback: string, name: string): str
 };
 
 export function parseConfig(env: Env): Config {
-  const language = LANGUAGES[(env.LANGUAGE ?? 'en').toLowerCase()];
-  if (!language) throw new Error(`LANGUAGE must be one of: ${Object.keys(LANGUAGES).join(', ')}`);
+  const language = LANGUAGES[(env.CALL_LANGUAGE ?? 'en').toLowerCase()];
+  if (!language) throw new Error(`CALL_LANGUAGE must be one of: ${Object.keys(LANGUAGES).join(', ')}`);
   return {
     allowedCaller: env.ALLOWED_CALLER,
     telnyxNumber: env.TELNYX_NUMBER,
@@ -150,29 +150,29 @@ export function parseConfig(env: Env): Config {
     threadId: env.CAPY_THREAD_ID,
     capyBase: env.CAPY_API_BASE ?? 'https://api.capy.ai/api/v1',
     language,
-    maxCallMs: int(env.MAX_CALL_SECONDS, 600, 'MAX_CALL_SECONDS') * 1000,
-    maxOutboundPerDay: int(env.MAX_OUTBOUND_PER_DAY, 10, 'MAX_OUTBOUND_PER_DAY'),
-    holdAfterMs: int(env.HOLD_AFTER_SECONDS, 6, 'HOLD_AFTER_SECONDS') * 1000,
+    maxCallMs: int(env.CALL_MAX_SECONDS, 600, 'CALL_MAX_SECONDS') * 1000,
+    maxOutboundPerDay: int(env.OUTBOUND_MAX_CALLS_PER_DAY, 10, 'OUTBOUND_MAX_CALLS_PER_DAY'),
+    holdAfterMs: int(env.HOLD_FILLER_AFTER_SECONDS, 6, 'HOLD_FILLER_AFTER_SECONDS') * 1000,
     holdMusicAfterMs: int(env.HOLD_MUSIC_AFTER_SECONDS, 15, 'HOLD_MUSIC_AFTER_SECONDS') * 1000,
-    replyTimeoutMs: int(env.REPLY_TIMEOUT_SECONDS, 300, 'REPLY_TIMEOUT_SECONDS') * 1000,
+    replyTimeoutMs: int(env.CALL_REPLY_TIMEOUT_SECONDS, 300, 'CALL_REPLY_TIMEOUT_SECONDS') * 1000,
     holdMusicUrl: env.HOLD_MUSIC_URL ?? '',
-    callModel: env.CALL_MODEL?.trim() || null,
-    callFast: env.CALL_FAST !== 'false',
-    axoModel: env.AXO_MODEL?.trim() || null,
-    callReasoning: env.CALL_REASONING === 'off' ? null : reasoning(env.CALL_REASONING, 'low', 'CALL_REASONING'),
-    axoReasoning: reasoning(env.AXO_REASONING, 'high', 'AXO_REASONING'),
-    maxSpokenChars: int(env.MAX_SPOKEN_CHARS, 700, 'MAX_SPOKEN_CHARS'),
-    idleMs: int(env.IDLE_SECONDS, 20, 'IDLE_SECONDS') * 1000,
-    greetingTimeoutMs: int(env.GREETING_TIMEOUT_SECONDS, 20, 'GREETING_TIMEOUT_SECONDS') * 1000,
+    callModel: env.CAPY_CALL_MODEL_ID?.trim() || null,
+    callFast: env.CAPY_CALL_FAST_MODE !== 'false',
+    axoModel: env.CAPY_DEFAULT_MODEL_ID?.trim() || null,
+    callReasoning: env.CAPY_CALL_REASONING_MODE === 'off' ? null : reasoning(env.CAPY_CALL_REASONING_MODE, 'low', 'CAPY_CALL_REASONING_MODE'),
+    axoReasoning: reasoning(env.CAPY_DEFAULT_REASONING_MODE, 'high', 'CAPY_DEFAULT_REASONING_MODE'),
+    maxSpokenChars: int(env.CALL_MAX_SPOKEN_CHARS, 700, 'CALL_MAX_SPOKEN_CHARS'),
+    idleMs: int(env.CALL_IDLE_SECONDS, 20, 'CALL_IDLE_SECONDS') * 1000,
+    greetingTimeoutMs: int(env.CALL_GREETING_TIMEOUT_SECONDS, 20, 'CALL_GREETING_TIMEOUT_SECONDS') * 1000,
     callerName: env.CALLER_NAME ?? 'Johan',
-    keyterms: (env.KEYTERMS ?? 'Axo,Capy,Johan,g4f4r0,Telnyx,Cloudflare,GitHub')
+    keyterms: (env.TELNYX_STT_KEYTERMS ?? 'Axo,Capy,Johan,g4f4r0,Telnyx,Cloudflare,GitHub')
       .split(',')
       .map(s => s.trim())
       .filter(Boolean),
     utteranceEndMs: 800,
-    voice: env.VOICE ?? language.voice,
-    sttEngine: env.STT_ENGINE ?? 'Deepgram',
-    sttModel: env.STT_MODEL ?? 'deepgram/nova-3',
+    voice: env.TELNYX_VOICE ?? language.voice,
+    sttEngine: env.TELNYX_STT_ENGINE ?? 'Deepgram',
+    sttModel: env.TELNYX_STT_MODEL ?? 'deepgram/nova-3',
     timezone: env.TIMEZONE ?? 'Europe/Madrid',
     debounceMs: 1000,
     pollMs: 250,

@@ -31,8 +31,8 @@ describe('telnyx transcription_start', () => {
     });
   });
 
-  it('switches the recognition language with LANGUAGE', async () => {
-    const { telnyx, requests } = capture({ LANGUAGE: 'es' });
+  it('switches the recognition language with CALL_LANGUAGE', async () => {
+    const { telnyx, requests } = capture({ CALL_LANGUAGE: 'es' });
     await telnyx.startTranscription('x');
     expect(requests[0].body.transcription_engine_config.language).toBe('es');
   });

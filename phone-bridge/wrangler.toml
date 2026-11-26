@@ -18,15 +18,17 @@ tag = "v1"
 new_sqlite_classes = ["PhoneBridge"]
 
 [vars]
-CALL_MODEL = "anthropic/claude-opus-5-5"
-CALL_REASONING = "low"
-CALL_FAST = "true"
-AXO_MODEL = "anthropic/claude-sonnet-5-5"
-AXO_REASONING = "high"
-LANGUAGE = "en"
-MAX_CALL_SECONDS = "600"
-MAX_OUTBOUND_PER_DAY = "10"
-HOLD_MUSIC_URL = "https://g4f4r0-axo.hellogafaro.workers.dev/hold.mp3"
 CAPY_THREAD_ID = "jam_01M7ZVYPQRQXF852J7VSRKMTAQ"
-TIMEZONE = "Europe/Madrid"
+CAPY_CALL_MODEL_ID = "anthropic/claude-opus-5-5"
+CAPY_CALL_REASONING_MODE = "low"
+CAPY_CALL_FAST_MODE = "true"
+CAPY_DEFAULT_MODEL_ID = "anthropic/claude-sonnet-5-5"
+CAPY_DEFAULT_REASONING_MODE = "high"
+
 TELNYX_CONNECTION_ID = "3101835432166425895"
+
+CALL_LANGUAGE = "en"
+CALL_MAX_SECONDS = "600"
+HOLD_MUSIC_URL = "https://g4f4r0-axo.hellogafaro.workers.dev/hold.mp3"
+OUTBOUND_MAX_CALLS_PER_DAY = "10"
+TIMEZONE = "Europe/Madrid"
