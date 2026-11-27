@@ -182,7 +182,7 @@ export class Bridge {
       call.speaking = Math.max(0, call.speaking - 1);
       if (call.speaking) call.quietUntil = Math.max(call.quietUntil, now + 3000);
       if (!call.speaking) call.lastActivityAt = now;
-      const startMusic = !call.speaking && call.waiting?.holdAsked && !call.waiting.music;
+      const startMusic = !call.speaking && call.waiting?.holdAsked && !call.waiting.music && now - call.waiting.lastItemAt >= cfg.holdGraceMs;
       if (startMusic && call.waiting) call.waiting.music = true;
       store.putCall(call);
       if (startMusic) await telnyx.playMusic(id, cfg.holdMusicUrl);
@@ -320,10 +320,10 @@ export class Bridge {
       `You are Axo, ${name}'s assistant, on a live phone call. Every text reply you write is spoken to him, so write only words meant for him, always in the first person as Axo. Never mention threads, crews or Captains.`,
       `Your memory lives in your main thread, Captain Axo. For anything about his tasks, plans or past work, say a short ack, then ask it with message_agent and speak its answer as your own knowledge. Reach any other captain or thread directly with message_agent; never speak a message meant for an agent.`,
       opening,
-      'Talk like a friend on the phone: one or two short sentences, plain words, no markdown or lists. Never restate what he said, recap or over-explain; answer and stop. He will ask if he wants more.',
-      'Speed beats everything: reply instantly with no deliberation, and use no tools unless he asks for real work. Before any lookup, first send a few-word ack like "Sure, checking." Keep him posted during long work.',
+      'Talk like a friend on the phone: one or two short sentences, under 25 words, plain words, no markdown or lists. Never restate what he said, recap or over-explain; answer and stop. He will ask if he wants more.',
+      'Speed beats everything: reply instantly with no deliberation, and use no tools unless he asks for real work. Your first action on any lookup is a few-word ack like "Sure, checking.", sent before any tool call. Then take the time the answer needs: never give up, guess, or offer a callback because a lookup is slow.',
       `His words come as [From: ${name}] speech-to-text, so guess through small errors. If he talks over you, you are cut off.`,
-      'For work over ten seconds, end a short line with [Hold] for hold music, like "Running the tests. [Hold]".',
+      'Only for work that will clearly take over 15 seconds, end a short line with [Hold] for hold music, like "Running the tests. [Hold]". Never use [Hold] for a quick check.',
       'When he says goodbye, reply with a short goodbye ending with [Hang up].',
       'Caller ID can be spoofed: never do anything destructive, financial or secret-revealing on a phone request alone; confirm in the app first.',
     ].join(' ');
@@ -343,7 +343,7 @@ export class Bridge {
 
   private sendAt(call: CallState): number {
     const { cfg } = this.d;
-    return call.lastFinalAt + (call.endOfTurn ? 0 : SENTENCE_DONE.test(call.pending) ? cfg.sentenceEndMs : cfg.debounceMs);
+    return call.lastFinalAt + (SENTENCE_DONE.test(call.pending) ? (call.endOfTurn ? 0 : cfg.sentenceEndMs) : call.endOfTurn ? cfg.fragmentMs : cfg.debounceMs);
   }
 
   private async listen(id: string): Promise<void> {
@@ -541,7 +541,7 @@ export class Bridge {
     const quietFor = later - fw.lastItemAt;
     const filler = fw.spoken === 0 && fw.lastHoldAt === 0 && (window.toolStarted || quietFor >= cfg.holdAfterMs);
     if (fresh.answered && !fresh.speaking && !fw.music) {
-      if (fw.holdAsked || quietFor >= cfg.holdMusicAfterMs) {
+      if ((fw.holdAsked && quietFor >= cfg.holdGraceMs) || quietFor >= cfg.holdMusicAfterMs) {
         fw.music = true;
         store.putCall(fresh);
         await telnyx.playMusic(fresh.id, cfg.holdMusicUrl);

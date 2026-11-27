@@ -285,15 +285,22 @@ describe('inbound: conversation', () => {
     expect(s.sent.at(-1)?.text).toBe('[Channel: Phone call] [From: Johan] What is on today?');
   });
 
-  it('trusts Flux end of turn and sends an unpunctuated turn quickly', async () => {
+  it('sends a finished Flux turn at once but holds a trailing fragment briefly', async () => {
     const f = setup();
     f.axo.stt = 'deepgram/flux';
     await f.pickUp();
     await f.spoke();
     f.working();
-    await f.hear('check my email');
-    await f.tick(400);
-    expect(f.sent.at(-1)?.text).toBe('[Channel: Phone call] [From: Johan] check my email');
+    await f.hear('Check my email.');
+    await f.tick();
+    expect(f.sent.at(-1)?.text).toBe('[Channel: Phone call] [From: Johan] Check my email.');
+    await f.spoke();
+    await f.hear('If it');
+    await f.tick(500);
+    expect(f.sent.at(-1)?.text).not.toContain('If it');
+    await f.hear('is done, tell me.');
+    await f.tick();
+    expect(f.sent.at(-1)?.text).toBe('[Channel: Phone call] [From: Johan] If it is done, tell me.');
   });
 
   it('hangs up after Axo says goodbye with [Hang up]', async () => {
@@ -407,12 +414,26 @@ describe('inbound: conversation', () => {
     expect(s.spoken().at(-1)).toBe('Let me run the tests.');
     expect(s.log.filter(l => l.startsWith('music'))).toEqual([]);
     await s.evt('call.speak.ended', { call_control_id: 'c1' });
+    expect(s.log.filter(l => l.startsWith('music'))).toEqual([]);
+    await s.tick(4000);
     expect(s.log.at(-1)).toBe('music c1 https://g4f4r0-axo.hellogafaro.workers.dev/hold.mp3');
     await s.tick(30_000);
     expect(s.log.filter(l => l.startsWith('music'))).toHaveLength(1);
     s.reply('All 56 tests pass.');
     await s.tick();
     expect(s.log.slice(-2)).toEqual(['stop c1', 'speak c1 All 56 tests pass.']);
+  });
+
+  it('skips the music when the answer lands soon after a [Hold] line', async () => {
+    await s.say('quick check');
+    s.reply('Checking. [hold]', 'working');
+    await s.tick();
+    await s.evt('call.speak.ended', { call_control_id: 'c1' });
+    await s.tick(1500);
+    s.reply('All good.');
+    await s.tick(500);
+    expect(s.log.filter(l => l.startsWith('music'))).toEqual([]);
+    expect(s.spoken().at(-1)).toBe('All good.');
   });
 
   it('plays no music for a quick answer', async () => {
@@ -442,6 +463,7 @@ describe('inbound: conversation', () => {
     s.reply('Digging in. [hold]', 'working');
     await s.tick();
     await s.spoke();
+    await s.tick(2000);
     expect(s.log.at(-1)).toBe('music c1 https://g4f4r0-axo.hellogafaro.workers.dev/hold.mp3');
     await s.hear('actually skip it');
     expect(s.log.at(-1)).toBe('stop c1');

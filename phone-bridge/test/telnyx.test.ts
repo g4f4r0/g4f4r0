@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createTelnyx } from '../src/telnyx';
-import { parseConfig, type Env } from '../src/config';
+import { parseConfig, TELNYX_STT_KEYTERMS, type Env } from '../src/config';
 
 function capture(env: Partial<Env> = {}, failures = 0) {
   const requests: { url: string; body: any }[] = [];
@@ -24,7 +24,7 @@ describe('telnyx transcription_start', () => {
         transcription_model: 'deepgram/flux',
         language: 'en',
         interim_results: true,
-        keyterms: ['Axo', 'Capy', 'Johan', 'g4f4r0', 'Telnyx', 'Cloudflare', 'GitHub'],
+        keyterms: TELNYX_STT_KEYTERMS,
       },
       transcription_tracks: 'inbound',
     });
@@ -43,7 +43,7 @@ describe('telnyx transcription_start', () => {
         language: 'en',
         utterance_end_ms: 800,
         interim_results: true,
-        keyterms: ['Axo', 'Capy', 'Johan', 'g4f4r0', 'Telnyx', 'Cloudflare', 'GitHub'],
+        keyterms: TELNYX_STT_KEYTERMS,
       },
       transcription_tracks: 'inbound',
     });

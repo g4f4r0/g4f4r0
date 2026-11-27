@@ -8,7 +8,11 @@ export const TELNYX_VOICE = 'Telnyx.Ultra.47c38ca4-5f35-497b-b1a3-415245fb35e1';
 export const TELNYX_STT_ENGINE = 'Deepgram';
 export const TELNYX_STT_MODEL = 'deepgram/flux';
 export const TELNYX_STT_FALLBACK_MODEL = 'deepgram/nova-3';
-export const TELNYX_STT_KEYTERMS = ['Axo', 'Capy', 'Johan', 'g4f4r0', 'Telnyx', 'Cloudflare', 'GitHub'];
+export const TELNYX_STT_KEYTERMS = [
+  'Axo', 'Capy', 'Johan', 'g4f4r0', 'Telnyx', 'Cloudflare', 'GitHub', 'Notion', 'Paper',
+  'Otto', 'Ada', 'Opal', 'Belly', 'Timber', 'Sam', 'Astro', 'Carat', 'Genuins', 'Lulu', 'Momo', 'Crispin', 'Molly', 'Penny', 'Herald',
+  'Jackfir', 'Facekit', 'Rebuy', 'Channable', 'Shopify', 'Klaviyo',
+];
 
 export const STRINGS = {
   greeting: 'Hey',
@@ -75,6 +79,8 @@ export interface Config {
   timezone: string;
   debounceMs: number;
   sentenceEndMs: number;
+  fragmentMs: number;
+  holdGraceMs: number;
   pollMs: number;
   streamWindowMs: number;
 }
@@ -117,6 +123,8 @@ export function parseConfig(env: Env): Config {
     timezone: TIMEZONE,
     debounceMs: 1200,
     sentenceEndMs: 400,
+    fragmentMs: 800,
+    holdGraceMs: 4000,
     pollMs: 250,
     streamWindowMs: 3000,
   };
