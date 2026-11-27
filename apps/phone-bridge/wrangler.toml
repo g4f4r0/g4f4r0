@@ -1,0 +1,25 @@
+name = "g4f4r0-axo"
+main = "src/index.ts"
+compatibility_date = "2026-11-01"
+workers_dev = true
+
+[assets]
+directory = "./public"
+
+[observability]
+enabled = true
+
+[[durable_objects.bindings]]
+name = "BRIDGE"
+class_name = "PhoneBridge"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["PhoneBridge"]
+
+[vars]
+CAPY_PROJECT_ID = "project_01M7ZAJTWC89WFEA5R2NFDDA4G"
+CAPY_CAPTAIN_ID = "jam_01M7ZVYPQRQXF852J7VSRKMTAQ"
+CAPY_CALL_MODEL_ID = "anthropic/claude-sonnet-5-5"
+CAPY_CALL_REASONING_MODE = "low"
+TELNYX_CONNECTION_ID = "3101835432166425895"

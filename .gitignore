@@ -1,24 +1,9 @@
-# build output
-dist/
-
-# generated types
-.astro/
-.vercel
-# dependencies
 node_modules/
-
-# logs
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
-
-# environment variables
+dist/
+.wrangler/
+.dev.vars
 .env
-.env.production
-
-# macOS-specific files
-.DS_Store
-
-# Typescript
+.env.*
 *.tsbuildinfo
+.DS_Store
+npm-debug.log*
