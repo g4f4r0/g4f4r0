@@ -17,7 +17,7 @@ export const TELNYX_STT_KEYTERMS = [
 export const STRINGS = {
   greeting: 'Hey',
   goodbye: 'Talk soon. Bye.',
-  fillers: ['Mm, one sec.', 'Okay, one sec.', 'One moment.'],
+  fillers: ['One sec.', 'Let me look.', 'Hmm, let me see.'],
   timeLimit: 'This call has reached its time limit. Goodbye.',
   replyTimeout: 'Axo has not answered yet. The answer will be in the thread. Goodbye.',
   failure: 'Something went wrong on my side. Please try again later. Goodbye.',
@@ -68,6 +68,7 @@ export interface Config {
   callReasoning: string;
   maxSpokenChars: number;
   idleMs: number;
+  idleByeMs: number;
   greetingTimeoutMs: number;
   callerName: string;
   keyterms: string[];
@@ -111,7 +112,8 @@ export function parseConfig(env: Env): Config {
     callModel: env.CAPY_CALL_MODEL_ID?.trim() || 'anthropic/claude-sonnet-5-5',
     callReasoning: reasoning(env.CAPY_CALL_REASONING_MODE, 'low', 'CAPY_CALL_REASONING_MODE'),
     maxSpokenChars: 700,
-    idleMs: 20_000,
+    idleMs: 40_000,
+    idleByeMs: 30_000,
     greetingTimeoutMs: 20_000,
     callerName: CALLER_NAME,
     keyterms: TELNYX_STT_KEYTERMS,

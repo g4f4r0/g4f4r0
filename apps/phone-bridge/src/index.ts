@@ -1,5 +1,5 @@
 import { DurableObject } from 'cloudflare:workers';
-import { Bridge, type CallState, type Store, type TelnyxEvent } from './engine';
+import { Bridge, type CallState, type Recent, type Store, type TelnyxEvent } from './engine';
 import { createCapy } from './capy';
 import { createTelnyx } from './telnyx';
 import { parseConfig, type Env } from './config';
@@ -19,7 +19,8 @@ export class PhoneBridge extends DurableObject<Env> {
       'CREATE TABLE IF NOT EXISTS outbound_counts (day TEXT PRIMARY KEY, n INTEGER NOT NULL);' +
         'CREATE TABLE IF NOT EXISTS calls (id TEXT PRIMARY KEY, state TEXT NOT NULL);' +
         'CREATE TABLE IF NOT EXISTS seen (id TEXT PRIMARY KEY, at INTEGER NOT NULL);' +
-        'CREATE TABLE IF NOT EXISTS archives (thread_id TEXT PRIMARY KEY, at INTEGER NOT NULL);',
+        'CREATE TABLE IF NOT EXISTS archives (thread_id TEXT PRIMARY KEY, at INTEGER NOT NULL);' +
+        'CREATE TABLE IF NOT EXISTS recent (id INTEGER PRIMARY KEY CHECK (id = 1), state TEXT NOT NULL);',
     );
   }
 
@@ -53,6 +54,14 @@ export class PhoneBridge extends DurableObject<Env> {
         const at = sql.exec('SELECT MIN(at) AS at FROM archives').toArray()[0]?.at;
         return at === null || at === undefined ? null : Number(at);
       },
+      getRecent: () => {
+        const row = sql.exec('SELECT state FROM recent WHERE id = 1').toArray()[0];
+        return row ? (JSON.parse(row.state as string) as Recent) : null;
+      },
+      setRecent: recent =>
+        void (recent
+          ? sql.exec('INSERT OR REPLACE INTO recent (id, state) VALUES (1, ?)', JSON.stringify(recent))
+          : sql.exec('DELETE FROM recent')),
       markSeen: (id, now) => {
         sql.exec('DELETE FROM seen WHERE at < ?', now - 3_600_000);
         if (sql.exec('SELECT 1 FROM seen WHERE id = ?', id).toArray().length) return false;
