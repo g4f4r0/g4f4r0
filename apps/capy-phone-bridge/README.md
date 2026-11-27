@@ -61,7 +61,7 @@ Fixed settings (caller name, time zone, voice, speech model, key terms, timings,
 | --- | --- |
 | `CAPY_PROJECT_ID` | Project the call threads are created in (GFR) |
 | `CAPY_CAPTAIN_ID` | Captain the call threads report to (Axo, GFR-4) |
-| `CAPY_CALL_MODEL_ID` | Model a call thread runs on, `anthropic/claude-sonnet-5-5` by default |
+| `CAPY_CALL_MODEL_ID` | Model a call thread runs on, `anthropic/claude-haiku-5-5` by default |
 | `CAPY_CALL_REASONING_MODE` | Reasoning in a call thread, `low` by default |
 | `TELNYX_CONNECTION_ID` | Telnyx Call Control application (g4f4r0-axo) the number is assigned to |
 

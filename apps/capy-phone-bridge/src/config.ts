@@ -109,7 +109,7 @@ export function parseConfig(env: Env): Config {
     holdMusicAfterMs: 15_000,
     replyTimeoutMs: 300_000,
     holdMusicUrl: HOLD_MUSIC_URL,
-    callModel: env.CAPY_CALL_MODEL_ID?.trim() || 'anthropic/claude-sonnet-5-5',
+    callModel: env.CAPY_CALL_MODEL_ID?.trim() || 'anthropic/claude-haiku-5-5',
     callReasoning: reasoning(env.CAPY_CALL_REASONING_MODE, 'low', 'CAPY_CALL_REASONING_MODE'),
     maxSpokenChars: 700,
     idleMs: 40_000,
