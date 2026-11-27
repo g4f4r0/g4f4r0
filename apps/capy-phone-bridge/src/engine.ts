@@ -446,7 +446,7 @@ export class Bridge {
   private async report(held: Recent): Promise<void> {
     const { cfg, store } = this.d;
     const duration = formatDuration(held.endedAt - held.since);
-    const text = `[Channel: Phone call] [Event: Call ended] [Duration: ${duration}] [Ended by: ${held.byUs ? 'Axo' : cfg.callerName}] The call is over and nothing you send is spoken. Report to your Captain now, starting with \`[Channel: Phone call] [Event: Call summary] [With: ${cfg.callerName}] [Duration: ${duration}]\`, then two or three lines on what was said and anything still to do.`;
+    const text = `[Channel: Phone call] [Event: Call ended] [Duration: ${duration}] [Ended by: ${held.byUs ? 'Axo' : cfg.callerName}] The call is over and nothing you send is spoken. Report to your Captain now with message_agent, starting with \`[Channel: Phone call] [Event: Call summary] [With: ${cfg.callerName}] [Duration: ${duration}]\`. Then write one or two short sentences on what the call was about, and short bullets only where needed for decisions, facts and anything still to do, with who does it and when. Give the Captain enough context to follow up without reading this thread, and nothing else.`;
     await this.d.capy.send(held.threadId, text, held.key, 'queue').catch(err => this.d.log(`end message failed: ${(err as Error).message}`));
     store.archiveLater(held.threadId, this.d.now() + ARCHIVE_AFTER_MS);
   }
