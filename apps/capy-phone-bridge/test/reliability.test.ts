@@ -321,9 +321,9 @@ describe('outbound when he does not pick up', () => {
     expect(s.log).toContain('speak o1 The backup failed. {"end":true}');
   });
 
-  it('does not add "You can reply now" to an alert that already asks a question', async () => {
+  it('speaks the alert alone, without a "You can reply now" tag', async () => {
     const s = setup();
-    await s.evt('call.answered', { call_control_id: 'o1', to: ALLOWED, client_state: encodeState({ k: 'out', text: 'The deploy failed. Roll it back?', listen: true }) });
-    expect(s.spoken()).toEqual(['The deploy failed. Roll it back?']);
+    await s.evt('call.answered', { call_control_id: 'o1', to: ALLOWED, client_state: encodeState({ k: 'out', text: 'This is a test call after the update.', listen: true }) });
+    expect(s.spoken()).toEqual(['This is a test call after the update.']);
   });
 });

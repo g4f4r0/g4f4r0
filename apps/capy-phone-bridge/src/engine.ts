@@ -186,7 +186,7 @@ export class Bridge {
         if (cs.listen) {
           this.resume(call, typeof cs.thread === 'string' ? cs.thread : undefined);
           store.putCall(call);
-          await this.say(call, /\?\s*$/.test(alert) ? alert : `${alert} ${cfg.language.strings.replyListen}`);
+          await this.say(call, alert);
           await this.listen(id);
         } else {
           store.putCall(call);
@@ -678,10 +678,14 @@ export class Bridge {
     const quietFor = later - fw.lastItemAt;
     const filler = fw.filler && fw.spoken === 0 && fw.lastHoldAt === 0 && !window.live.length && (window.toolStarted || quietFor >= cfg.holdAfterMs);
     if (fresh.answered && !fresh.speaking && !fw.music) {
-      if ((fw.holdAsked && quietFor >= cfg.holdGraceMs) || quietFor >= cfg.holdMusicAfterMs) {
+      if (fw.holdAsked && quietFor >= cfg.holdGraceMs) {
         fw.music = true;
         store.putCall(fresh);
         await telnyx.playMusic(fresh.id, cfg.holdMusicUrl);
+      } else if (quietFor >= cfg.holdMusicAfterMs) {
+        fw.holdAsked = true;
+        fw.lastItemAt = later;
+        await this.say(fresh, strings.slow);
       } else if (filler) {
         fw.lastHoldAt = later;
         await this.say(fresh, strings.fillers[fresh.fillers++ % strings.fillers.length]);
