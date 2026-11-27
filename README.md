@@ -4,7 +4,7 @@ Johan's personal tools, one folder per app.
 
 | Path | What it is |
 | --- | --- |
-| [apps/phone-bridge](apps/phone-bridge) | Cloudflare Worker `g4f4r0-axo` that lets Johan talk to Axo by phone through Telnyx, and lets Axo phone him |
+| [apps/capy-phone-bridge](apps/capy-phone-bridge) | Cloudflare Worker `capy-phone-bridge` that lets Johan talk to Axo by phone through Telnyx, and lets Axo phone him |
 | [docs](docs) | Notes that span more than one app |
 
 ## Working in the repo

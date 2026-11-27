@@ -310,7 +310,7 @@ describe('inbound: conversation', () => {
     await s.evt('call.speak.ended', { call_control_id: 'c1' });
     expect(s.log.filter(l => l.startsWith('music'))).toEqual([]);
     await s.tick(4000);
-    expect(s.log.at(-1)).toBe('music c1 https://g4f4r0-axo.hellogafaro.workers.dev/hold.mp3');
+    expect(s.log.at(-1)).toBe('music c1 https://capy-phone-bridge.hellogafaro.workers.dev/hold.mp3');
     await s.tick(30_000);
     expect(s.log.filter(l => l.startsWith('music'))).toHaveLength(1);
     s.reply('All 56 tests pass.');
@@ -349,7 +349,7 @@ describe('inbound: conversation', () => {
     await s.tick(5000);
     expect(s.log.filter(l => l.startsWith('music'))).toEqual([]);
     await s.tick(1200);
-    expect(s.log.at(-1)).toBe('music c1 https://g4f4r0-axo.hellogafaro.workers.dev/hold.mp3');
+    expect(s.log.at(-1)).toBe('music c1 https://capy-phone-bridge.hellogafaro.workers.dev/hold.mp3');
   });
 
   it('stops the music when he talks during hold', async () => {
@@ -358,7 +358,7 @@ describe('inbound: conversation', () => {
     await s.tick();
     await s.spoke();
     await s.tick(2000);
-    expect(s.log.at(-1)).toBe('music c1 https://g4f4r0-axo.hellogafaro.workers.dev/hold.mp3');
+    expect(s.log.at(-1)).toBe('music c1 https://capy-phone-bridge.hellogafaro.workers.dev/hold.mp3');
     await s.hear('actually skip it');
     expect(s.log.at(-1)).toBe('stop c1');
     await s.tick(1200);

@@ -1,4 +1,4 @@
-name = "g4f4r0-axo"
+name = "capy-phone-bridge"
 main = "src/index.ts"
 compatibility_date = "2026-11-01"
 workers_dev = true

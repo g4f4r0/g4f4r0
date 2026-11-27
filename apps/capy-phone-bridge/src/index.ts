@@ -148,6 +148,6 @@ export default {
       return stub.fetch('https://bridge/call', { method: 'POST', body: JSON.stringify({ text, listen: body.listen === true }) });
     }
 
-    return new Response('phone-bridge', { status: 404 });
+    return new Response('capy-phone-bridge', { status: 404 });
   },
 };

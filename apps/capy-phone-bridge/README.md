@@ -1,4 +1,4 @@
-# phone-bridge (Worker g4f4r0-axo)
+# capy-phone-bridge (Worker capy-phone-bridge)
 
 A Cloudflare Worker and Durable Object that lets Johan talk to Axo (Captain thread GFR-4) by phone, and lets Axo phone Johan.
 Telnyx Call Control does the audio (speech to text and text to speech), so the Worker only handles HTTPS webhooks. Each call gets its own Capy thread in Axo's crew, so that thread is the call history and Axo gets a summary when it ends.
@@ -39,7 +39,7 @@ sequenceDiagram
 ## Outbound calls (how Axo phones Johan)
 
 ```bash
-curl -X POST https://g4f4r0-axo.<account-subdomain>.workers.dev/call \
+curl -X POST https://capy-phone-bridge.<account-subdomain>.workers.dev/call \
   -H "Authorization: Bearer $OUTBOUND_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"text": "The nightly backup failed twice.", "listen": true}'
@@ -79,8 +79,8 @@ Set with `wrangler secret put <NAME>` (or through the Cloudflare API). Never com
 
 ## Setup and deploy
 
-1. In Telnyx create a Call Control application (webhook API version v2) whose webhook URL is `https://g4f4r0-axo.<account-subdomain>.workers.dev/telnyx/webhook`, and assign the purchased number to it.
-2. `npm install` at the repository root, then `cd apps/phone-bridge`
+1. In Telnyx create a Call Control application (webhook API version v2) whose webhook URL is `https://capy-phone-bridge.<account-subdomain>.workers.dev/telnyx/webhook`, and assign the purchased number to it.
+2. `npm install` at the repository root, then `cd apps/capy-phone-bridge`
 3. Set `TELNYX_CONNECTION_ID` in `wrangler.toml` and put the six secrets above with `wrangler secret put`.
 4. `npm run deploy`
 
