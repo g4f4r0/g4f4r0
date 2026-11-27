@@ -45,7 +45,7 @@ describe('capy call thread', () => {
       captainId: 'jam_axo',
       title: 'Phone call from Johan',
       message: 'start',
-      model: { modelId: 'anthropic/claude-sonnet-5-5', reasoningMode: 'low' },
+      model: { modelId: 'anthropic/claude-haiku-5-5', reasoningMode: 'low' },
       machineSize: 'small',
     });
     await capy.archive('jam_new');

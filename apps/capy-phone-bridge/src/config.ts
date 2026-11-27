@@ -2,7 +2,7 @@ export const CALLER_NAME = 'Johan';
 export const TIMEZONE = 'Europe/Madrid';
 export const MAX_CALL_SECONDS = 600;
 export const MAX_OUTBOUND_CALLS_PER_DAY = 10;
-export const HOLD_MUSIC_URL = 'https://g4f4r0-axo.hellogafaro.workers.dev/hold.mp3';
+export const HOLD_MUSIC_URL = 'https://capy-phone-bridge.hellogafaro.workers.dev/hold.mp3';
 export const CAPY_API_BASE = 'https://api.capy.ai/api/v1';
 export const TELNYX_VOICE = 'Telnyx.Ultra.47c38ca4-5f35-497b-b1a3-415245fb35e1';
 export const TELNYX_STT_ENGINE = 'Deepgram';
@@ -17,7 +17,7 @@ export const TELNYX_STT_KEYTERMS = [
 export const STRINGS = {
   greeting: 'Hey',
   goodbye: 'Talk soon. Bye.',
-  fillers: ['Mm, one sec.', 'Okay, one sec.', 'One moment.'],
+  fillers: ['One sec.', 'Let me look.', 'Hmm, let me see.'],
   timeLimit: 'This call has reached its time limit. Goodbye.',
   replyTimeout: 'Axo has not answered yet. The answer will be in the thread. Goodbye.',
   failure: 'Something went wrong on my side. Please try again later. Goodbye.',
@@ -68,6 +68,7 @@ export interface Config {
   callReasoning: string;
   maxSpokenChars: number;
   idleMs: number;
+  idleByeMs: number;
   greetingTimeoutMs: number;
   callerName: string;
   keyterms: string[];
@@ -108,10 +109,11 @@ export function parseConfig(env: Env): Config {
     holdMusicAfterMs: 15_000,
     replyTimeoutMs: 300_000,
     holdMusicUrl: HOLD_MUSIC_URL,
-    callModel: env.CAPY_CALL_MODEL_ID?.trim() || 'anthropic/claude-sonnet-5-5',
+    callModel: env.CAPY_CALL_MODEL_ID?.trim() || 'anthropic/claude-haiku-5-5',
     callReasoning: reasoning(env.CAPY_CALL_REASONING_MODE, 'low', 'CAPY_CALL_REASONING_MODE'),
     maxSpokenChars: 700,
-    idleMs: 20_000,
+    idleMs: 40_000,
+    idleByeMs: 30_000,
     greetingTimeoutMs: 20_000,
     callerName: CALLER_NAME,
     keyterms: TELNYX_STT_KEYTERMS,

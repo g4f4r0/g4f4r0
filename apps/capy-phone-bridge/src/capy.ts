@@ -23,9 +23,10 @@ export interface ReplyWindow {
 
 export interface CapyApi {
   createThread(message: string, requestId: string, title: string): Promise<string>;
-  send(threadId: string, text: string, clientKey: string, delivery?: 'interrupt' | 'queue'): Promise<string>;
+  send(threadId: string, text: string, clientKey: string, delivery?: 'interrupt' | 'steer' | 'queue'): Promise<string>;
   readReplies(threadId: string, afterId: string, windowMs: number, wake?: AbortSignal): Promise<ReplyWindow>;
   archive(threadId: string): Promise<void>;
+  status(threadId: string): Promise<string>;
 }
 
 const BATCH_MS = 150;
@@ -84,6 +85,12 @@ export function createCapy(apiKey: string, cfg: Config, fetcher: typeof fetch = 
       ((await post(url(threadId, '/message'), { text, delivery, clientKey })) as { id: string }).id,
 
     archive: async threadId => void (await post(url(threadId, '/archive'), {})),
+
+    status: async threadId => {
+      const res = await fetcher(url(threadId, ''), { headers, signal: AbortSignal.timeout(SEND_TIMEOUT_MS) });
+      if (!res.ok) throw new Error(`capy thread read failed with ${res.status}`);
+      return ((await res.json()) as { status: string }).status;
+    },
 
     readReplies: async (threadId, afterId, windowMs, wake) => {
       const result: ReplyWindow = { items: [], live: [], cursor: afterId, status: null, worked: false, toolStarted: false };

@@ -1,112 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { Bridge, type CallState, type Store } from '../src/engine';
-import { parseConfig, type Env } from '../src/config';
 import { encodeState } from '../src/telnyx';
-import type { CapyMessage } from '../src/capy';
-
-const ALLOWED = '+15555550100';
-const REAL_ID = 'v3:ie0odK7cm5dCtztjy7_cbP30iOz-ruWD1g8xOEegMCBlZhv9DwtKqg';
-
-function setup(overrides: Partial<Env> = {}) {
-  const calls = new Map<string, CallState>();
-  const counts = new Map<string, number>();
-  const seen = new Set<string>();
-  const archives = new Map<string, number>();
-  const store: Store = {
-    count: d => counts.get(d) ?? 0,
-    increment: d => void counts.set(d, (counts.get(d) ?? 0) + 1),
-    getCall: id => calls.get(id),
-    putCall: s => void calls.set(s.id, s),
-    deleteCall: id => void calls.delete(id),
-    listCalls: () => [...calls.values()],
-    markSeen: id => (seen.has(id) ? false : (seen.add(id), true)),
-    archiveLater: (id, at) => void archives.set(id, at),
-    dueArchives: now => [...archives].filter(([, at]) => at <= now).map(([id]) => (archives.delete(id), id)),
-    nextArchiveAt: () => (archives.size ? Math.min(...archives.values()) : null),
-  };
-  const log: string[] = [];
-  const sent: { text: string; key: string; delivery: string; thread: string }[] = [];
-  const axo = { queue: [] as CapyMessage[], status: 'working', worked: true, sendFails: 0, readFails: 0, live: [] as { callId: string; text: string }[], tool: false, stt: 'deepgram/nova-3' };
-  const clock = { now: Date.UTC(2026, 10, 26, 18, 0) };
-  const env = { CALLER_PHONE_NUMBER: ALLOWED, TELNYX_PHONE_NUMBER: '+15555550199', TELNYX_CONNECTION_ID: 'c', CAPY_PROJECT_ID: 'project_x', CAPY_CAPTAIN_ID: 'jam_axo', ...overrides } as Env;
-  const cfg = parseConfig(env);
-  let m = 0;
-  const bridge = new Bridge({
-    cfg,
-    store,
-    now: () => clock.now,
-    setAlarm: async () => undefined,
-    log: () => undefined,
-    telnyx: {
-      answer: async (id, s) => void log.push(`answer ${id} ${JSON.stringify(s)}`),
-      reject: async id => void log.push(`reject ${id}`),
-      speak: async (id, t, s) => void log.push(`speak ${id} ${t}${s ? ' ' + JSON.stringify(s) : ''}`),
-      stopSpeaking: async id => void log.push(`stop ${id}`),
-      playMusic: async (id, url) => void log.push(`music ${id} ${url}`),
-      startTranscription: async id => (log.push(`stt ${id}`), axo.stt),
-      hangup: async id => void log.push(`hangup ${id}`),
-      dial: async s => (log.push(`dial ${JSON.stringify(s)}`), 'out-1'),
-    },
-    capy: {
-      createThread: async (text, key) => {
-        if (axo.sendFails > 0 && axo.sendFails--) throw new Error('capy down');
-        sent.push({ text, key, delivery: 'interrupt', thread: 'new' });
-        return 'jam_call';
-      },
-      send: async (thread, text, key, delivery = 'interrupt') => {
-        if (axo.sendFails > 0 && axo.sendFails--) throw new Error('capy down');
-        sent.push({ text, key, delivery, thread });
-        return `01MSG${String(++m).padStart(21, '0')}`;
-      },
-      archive: async thread => void log.push(`archive ${thread}`),
-      readReplies: async (_thread, afterId) => {
-        if (axo.readFails > 0 && axo.readFails--) throw new Error('stream 503');
-        const w = { items: axo.queue.splice(0), live: axo.live.splice(0), cursor: afterId, status: axo.status, worked: axo.worked, toolStarted: axo.tool };
-        axo.tool = false;
-        axo.worked = axo.status === 'working';
-        return w;
-      },
-    },
-  });
-  let n = 0;
-  const evt = (type: string, payload: Record<string, unknown>) =>
-    bridge.handleEvent({ data: { event_type: type, id: `e${++n}`, payload } });
-  const tick = async (ms = 0) => {
-    clock.now += ms;
-    await bridge.tick();
-  };
-  const reply = (text: string, status = 'idle') => {
-    axo.queue.push({ id: `a${++m}`, source: 'assistant', text });
-    axo.status = status;
-  };
-  const working = () => void ((axo.status = 'working'), (axo.worked = true));
-  const spoke = async (id = 'c1') => {
-    await evt('call.speak.ended', { call_control_id: id });
-    clock.now += 2000;
-  };
-  const hear = (text: string, id = 'c1') =>
-    evt('call.transcription', { call_control_id: id, transcription_data: { is_final: true, transcript: text } });
-  const say = async (text: string, id = 'c1') => {
-    await spoke(id);
-    working();
-    await hear(text, id);
-    await tick(1200);
-  };
-  const ring = async (id = 'c1') => {
-    await evt('call.initiated', { call_control_id: id, direction: 'incoming', from: ALLOWED });
-    await tick();
-  };
-  const pickUp = async (id = 'c1') => {
-    await ring(id);
-    reply('Hey Johan, what is up?');
-    await tick();
-    await evt('call.answered', { call_control_id: id, from: ALLOWED, client_state: encodeState({ k: 'in' }) });
-  };
-  const spoken = () => log.filter(l => l.startsWith('speak')).map(l => l.replace(/^speak \S+ /, ''));
-  return { bridge, store, log, sent, axo, clock, evt, tick, reply, working, spoke, hear, say, ring, pickUp, spoken, cfg };
-}
-
-type S = ReturnType<typeof setup>;
+import { ALLOWED, REAL_ID, setup, type S } from './harness';
 
 describe('inbound: picking up', () => {
   let s: S;
@@ -125,7 +19,7 @@ describe('inbound: picking up', () => {
     const start = s.sent[0].text;
     expect(start).toMatch(/^\[Channel: Phone call\] \[Event: Incoming call\] \[From: Johan\] \[Time: Thu, 26 Nov 2026, 19:00 Europe\/Madrid\] /);
     expect(start).toContain('greet him by name');
-    expect(start).toContain('Never restate what he said');
+    expect(start).toContain('Never repeat his words back');
     expect(s.log).toEqual([]);
     s.reply('Hey Johan, what is up?');
     await s.tick();
@@ -416,7 +310,7 @@ describe('inbound: conversation', () => {
     await s.evt('call.speak.ended', { call_control_id: 'c1' });
     expect(s.log.filter(l => l.startsWith('music'))).toEqual([]);
     await s.tick(4000);
-    expect(s.log.at(-1)).toBe('music c1 https://g4f4r0-axo.hellogafaro.workers.dev/hold.mp3');
+    expect(s.log.at(-1)).toBe('music c1 https://capy-phone-bridge.hellogafaro.workers.dev/hold.mp3');
     await s.tick(30_000);
     expect(s.log.filter(l => l.startsWith('music'))).toHaveLength(1);
     s.reply('All 56 tests pass.');
@@ -455,7 +349,7 @@ describe('inbound: conversation', () => {
     await s.tick(5000);
     expect(s.log.filter(l => l.startsWith('music'))).toEqual([]);
     await s.tick(1200);
-    expect(s.log.at(-1)).toBe('music c1 https://g4f4r0-axo.hellogafaro.workers.dev/hold.mp3');
+    expect(s.log.at(-1)).toBe('music c1 https://capy-phone-bridge.hellogafaro.workers.dev/hold.mp3');
   });
 
   it('stops the music when he talks during hold', async () => {
@@ -464,7 +358,7 @@ describe('inbound: conversation', () => {
     await s.tick();
     await s.spoke();
     await s.tick(2000);
-    expect(s.log.at(-1)).toBe('music c1 https://g4f4r0-axo.hellogafaro.workers.dev/hold.mp3');
+    expect(s.log.at(-1)).toBe('music c1 https://capy-phone-bridge.hellogafaro.workers.dev/hold.mp3');
     await s.hear('actually skip it');
     expect(s.log.at(-1)).toBe('stop c1');
     await s.tick(1200);
@@ -523,15 +417,17 @@ describe('inbound: silence and hang up', () => {
     await s.tick();
   });
 
-  it('asks Axo to check in after 20 seconds of silence, then to say goodbye, then hangs up', async () => {
-    await s.tick(17_000);
+  it('asks Axo to check in after 40 seconds of silence, then to say goodbye 30 seconds later, then hangs up', async () => {
+    await s.tick(37_000);
     expect(s.sent).toHaveLength(1);
     await s.tick(1_500);
-    expect(s.sent[1].text).toMatch(/^\[Channel: Phone call\] \[Event: Silence\] \[Duration: 2\ds\] Check in/);
-    s.reply('Anything else?');
+    expect(s.sent[1].text).toMatch(/^\[Channel: Phone call\] \[Event: Silence\] \[Duration: 4\ds\] He has gone quiet/);
+    s.reply('Still there?');
     await s.tick();
     await s.spoke();
-    await s.tick(20_000);
+    await s.tick(27_000);
+    expect(s.sent).toHaveLength(2);
+    await s.tick(1_500);
     expect(s.sent[2].text).toContain('goodbye');
     s.reply('Talk later, Johan.');
     await s.tick();
@@ -541,16 +437,18 @@ describe('inbound: silence and hang up', () => {
   });
 
   it('resets the silence counter when he speaks', async () => {
-    await s.tick(21_000);
+    await s.tick(41_000);
     s.reply('Anything else?');
     await s.tick();
     await s.say('yes, one thing');
     expect(s.store.getCall('c1')?.idlePrompts).toBe(0);
   });
 
-  it('records the end of the call in the thread without interrupting Axo', async () => {
+  it('records the end of the call in the thread without interrupting Axo, once a redial is no longer likely', async () => {
     s.clock.now += 72_000;
     await s.evt('call.hangup', { call_control_id: 'c1', hangup_source: 'caller' });
+    expect(s.store.getCall('c1')).toBeUndefined();
+    await s.tick(300_000);
     expect(s.sent.at(-1)?.delivery).toBe('queue');
     expect(s.sent.at(-1)?.text).toMatch(/^\[Channel: Phone call\] \[Event: Call ended\] \[Duration: 1m 1\ds\] \[Ended by: Johan\] /);
     expect(s.store.getCall('c1')).toBeUndefined();
@@ -561,6 +459,7 @@ describe('inbound: silence and hang up', () => {
     expect(s.sent[0].thread).toBe('new');
     expect(s.sent[1].thread).toBe('jam_call');
     await s.evt('call.hangup', { call_control_id: 'c1', hangup_source: 'caller' });
+    await s.tick(300_000);
     expect(s.sent.at(-1)?.thread).toBe('jam_call');
     expect(s.sent.at(-1)?.text).toContain('Report to your Captain');
     await s.tick(179_000);

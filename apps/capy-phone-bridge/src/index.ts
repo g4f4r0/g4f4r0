@@ -1,5 +1,5 @@
 import { DurableObject } from 'cloudflare:workers';
-import { Bridge, type CallState, type Store, type TelnyxEvent } from './engine';
+import { Bridge, type CallState, type Recent, type Store, type TelnyxEvent } from './engine';
 import { createCapy } from './capy';
 import { createTelnyx } from './telnyx';
 import { parseConfig, type Env } from './config';
@@ -7,6 +7,7 @@ import { bearerMatches } from './guards';
 import { verifyTelnyxSignature } from './verify';
 
 const MAX_ALERT_CHARS = 1000;
+const THREAD_ID = /^jam_[0-9A-Za-z]{10,40}$/;
 
 export class PhoneBridge extends DurableObject<Env> {
   private sql = this.ctx.storage.sql;
@@ -19,7 +20,8 @@ export class PhoneBridge extends DurableObject<Env> {
       'CREATE TABLE IF NOT EXISTS outbound_counts (day TEXT PRIMARY KEY, n INTEGER NOT NULL);' +
         'CREATE TABLE IF NOT EXISTS calls (id TEXT PRIMARY KEY, state TEXT NOT NULL);' +
         'CREATE TABLE IF NOT EXISTS seen (id TEXT PRIMARY KEY, at INTEGER NOT NULL);' +
-        'CREATE TABLE IF NOT EXISTS archives (thread_id TEXT PRIMARY KEY, at INTEGER NOT NULL);',
+        'CREATE TABLE IF NOT EXISTS archives (thread_id TEXT PRIMARY KEY, at INTEGER NOT NULL);' +
+        'CREATE TABLE IF NOT EXISTS recent (id INTEGER PRIMARY KEY CHECK (id = 1), state TEXT NOT NULL);',
     );
   }
 
@@ -53,6 +55,14 @@ export class PhoneBridge extends DurableObject<Env> {
         const at = sql.exec('SELECT MIN(at) AS at FROM archives').toArray()[0]?.at;
         return at === null || at === undefined ? null : Number(at);
       },
+      getRecent: () => {
+        const row = sql.exec('SELECT state FROM recent WHERE id = 1').toArray()[0];
+        return row ? (JSON.parse(row.state as string) as Recent) : null;
+      },
+      setRecent: recent =>
+        void (recent
+          ? sql.exec('INSERT OR REPLACE INTO recent (id, state) VALUES (1, ?)', JSON.stringify(recent))
+          : sql.exec('DELETE FROM recent')),
       markSeen: (id, now) => {
         sql.exec('DELETE FROM seen WHERE at < ?', now - 3_600_000);
         if (sql.exec('SELECT 1 FROM seen WHERE id = ?', id).toArray().length) return false;
@@ -89,8 +99,8 @@ export class PhoneBridge extends DurableObject<Env> {
       return new Response('ok');
     }
     if (url.pathname === '/call') {
-      const { text, listen } = (await request.json()) as { text: string; listen: boolean };
-      const result = await bridge.placeOutbound(text, listen);
+      const { text, listen, thread } = (await request.json()) as { text: string; listen: boolean; thread?: string };
+      const result = await bridge.placeOutbound(text, listen, thread);
       if (result.ok) return Response.json({ status: 'calling' }, { status: 202 });
       return Response.json({ error: result.reason === 'cap' ? 'daily outbound call limit reached' : 'call failed' }, {
         status: result.reason === 'cap' ? 429 : 502,
@@ -126,7 +136,7 @@ export default {
       if (!(await bearerMatches(request.headers.get('authorization'), env.OUTBOUND_TOKEN))) {
         return new Response('unauthorized', { status: 401 });
       }
-      let body: { text?: unknown; listen?: unknown };
+      let body: { text?: unknown; listen?: unknown; thread?: unknown };
       try {
         body = await request.json();
       } catch {
@@ -136,9 +146,15 @@ export default {
       if (!text || text.length > MAX_ALERT_CHARS) {
         return Response.json({ error: `text is required and must be at most ${MAX_ALERT_CHARS} characters` }, { status: 400 });
       }
-      return stub.fetch('https://bridge/call', { method: 'POST', body: JSON.stringify({ text, listen: body.listen === true }) });
+      if (body.thread !== undefined && (typeof body.thread !== 'string' || !THREAD_ID.test(body.thread))) {
+        return Response.json({ error: 'thread must be a Capy thread id like jam_...' }, { status: 400 });
+      }
+      return stub.fetch('https://bridge/call', {
+        method: 'POST',
+        body: JSON.stringify({ text, listen: body.listen === true, ...(body.thread ? { thread: body.thread } : {}) }),
+      });
     }
 
-    return new Response('phone-bridge', { status: 404 });
+    return new Response('capy-phone-bridge', { status: 404 });
   },
 };
