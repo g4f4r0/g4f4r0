@@ -179,21 +179,21 @@ describe('inbound: conversation', () => {
     expect(s.sent.at(-1)?.text).toBe('[Channel: Phone call] [From: Johan] What is on today?');
   });
 
-  it('sends a finished Flux turn after a short hold and holds a trailing fragment longer', async () => {
+  it('sends a finished Flux turn at once but holds a trailing fragment briefly', async () => {
     const f = setup();
     f.axo.stt = 'deepgram/flux';
     await f.pickUp();
     await f.spoke();
     f.working();
     await f.hear('Check my email.');
-    await f.tick(f.cfg.sentenceEndMs);
+    await f.tick();
     expect(f.sent.at(-1)?.text).toBe('[Channel: Phone call] [From: Johan] Check my email.');
     await f.spoke();
     await f.hear('If it');
     await f.tick(500);
     expect(f.sent.at(-1)?.text).not.toContain('If it');
     await f.hear('is done, tell me.');
-    await f.tick(f.cfg.sentenceEndMs);
+    await f.tick();
     expect(f.sent.at(-1)?.text).toBe('[Channel: Phone call] [From: Johan] If it is done, tell me.');
   });
 

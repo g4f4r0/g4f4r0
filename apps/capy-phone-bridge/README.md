@@ -47,8 +47,9 @@ curl -X POST https://capy-phone-bridge.<account-subdomain>.workers.dev/call \
 
 - `text` (required, at most 1000 characters) is spoken when Johan answers.
 - `listen` (optional, default false). When true the call stays open after the alert (followed by "You can reply now." unless the alert already ends with a question) and whatever Johan answers is sent into a call thread with the alert as context, then Axo's reply is spoken, turn by turn. It is the previous call's thread when that call ended less than five minutes earlier, otherwise a new one. When false the call hangs up after the alert.
+- `thread` (optional, a Capy thread id such as `jam_...`). With `listen`, his answer goes into that thread instead, however long ago the last call ended. A call thread passes its own id when it phones him back as promised, so a "call me in 30 minutes" stays one conversation.
 - If voicemail picks up a `listen` call, the bridge recognises the greeting, speaks the alert once more for the recording and hangs up, and nothing reaches a thread.
-- Responses: `202` call is being placed, `401` missing or wrong token (no call is placed), `400` bad body, `429` daily limit reached, `502` Telnyx refused the call.
+- Responses: `202` call is being placed, `401` missing or wrong token (no call is placed), `400` bad body or thread id, `429` daily limit reached, `502` Telnyx refused the call.
 
 The call always goes to `CALLER_PHONE_NUMBER`; the endpoint cannot dial anything else.
 

@@ -108,6 +108,30 @@ describe('signal loss and redial', () => {
   });
 });
 
+describe('callbacks Axo promised', () => {
+  it('brings a callback 30 minutes later back into the thread that promised it', async () => {
+    const s = setup();
+    await s.pickUp();
+    await s.say('call me in thirty minutes');
+    s.reply('Will do, talk in thirty. [Hang up]');
+    await s.tick();
+    await s.evt('call.speak.ended', { call_control_id: 'c1' });
+    await s.evt('call.hangup', { call_control_id: 'c1', hangup_source: 'callee' });
+    s.axo.threadStatus = 'waiting';
+    await s.tick(RESUME_MS + 1000);
+    await s.tick(25 * 60_000);
+    expect(s.log).not.toContain('archive jam_call');
+    await s.bridge.placeOutbound('Calling you back as promised.', true, 'jam_call');
+    expect(s.log).toContain('dial {"k":"out","text":"Calling you back as promised.","listen":true,"thread":"jam_call"}');
+    await s.evt('call.answered', { call_control_id: 'o1', to: ALLOWED, client_state: encodeState({ k: 'out', text: 'Calling you back as promised.', listen: true, thread: 'jam_call' }) });
+    await s.say('yes go ahead', 'o1');
+    const first = s.sent.at(-1)!;
+    expect(first.thread).toBe('jam_call');
+    expect(first.text).toMatch(/^\[Channel: Phone call\] \[Event: Call resumed\] \[To: Johan\] \[Time: [^\]]+\] You phoned Johan again/);
+    expect(s.sent.filter(x => x.thread === 'new')).toHaveLength(1);
+  });
+});
+
 describe('drops that race the bridge', () => {
   let s: S;
   beforeEach(async () => {

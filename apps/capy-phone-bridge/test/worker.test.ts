@@ -41,6 +41,16 @@ describe('POST /call', () => {
     expect(JSON.parse(forwarded[0].body)).toEqual({ text: 'Server down', listen: true });
   });
 
+  it('forwards a callback thread and rejects anything that is not a thread id', async () => {
+    const { env, forwarded } = await makeEnv();
+    const auth = { authorization: 'Bearer tok-123' };
+    expect((await worker.fetch(call(auth, { text: 'Back to you', listen: true, thread: 'jam_01M8ETT63B4N1FKT99PJCES5R1' }), env)).status).toBe(202);
+    expect(JSON.parse(forwarded[0].body)).toEqual({ text: 'Back to you', listen: true, thread: 'jam_01M8ETT63B4N1FKT99PJCES5R1' });
+    expect((await worker.fetch(call(auth, { text: 'x', thread: '../threads' }), env)).status).toBe(400);
+    expect((await worker.fetch(call(auth, { text: 'x', thread: 7 }), env)).status).toBe(400);
+    expect(forwarded).toHaveLength(1);
+  });
+
   it('rejects empty or oversized text with 400', async () => {
     const { env, forwarded } = await makeEnv();
     expect((await worker.fetch(call({ authorization: 'Bearer tok-123' }, { text: '' }), env)).status).toBe(400);

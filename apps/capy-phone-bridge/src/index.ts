@@ -7,6 +7,7 @@ import { bearerMatches } from './guards';
 import { verifyTelnyxSignature } from './verify';
 
 const MAX_ALERT_CHARS = 1000;
+const THREAD_ID = /^jam_[0-9A-Za-z]{10,40}$/;
 
 export class PhoneBridge extends DurableObject<Env> {
   private sql = this.ctx.storage.sql;
@@ -98,8 +99,8 @@ export class PhoneBridge extends DurableObject<Env> {
       return new Response('ok');
     }
     if (url.pathname === '/call') {
-      const { text, listen } = (await request.json()) as { text: string; listen: boolean };
-      const result = await bridge.placeOutbound(text, listen);
+      const { text, listen, thread } = (await request.json()) as { text: string; listen: boolean; thread?: string };
+      const result = await bridge.placeOutbound(text, listen, thread);
       if (result.ok) return Response.json({ status: 'calling' }, { status: 202 });
       return Response.json({ error: result.reason === 'cap' ? 'daily outbound call limit reached' : 'call failed' }, {
         status: result.reason === 'cap' ? 429 : 502,
@@ -135,7 +136,7 @@ export default {
       if (!(await bearerMatches(request.headers.get('authorization'), env.OUTBOUND_TOKEN))) {
         return new Response('unauthorized', { status: 401 });
       }
-      let body: { text?: unknown; listen?: unknown };
+      let body: { text?: unknown; listen?: unknown; thread?: unknown };
       try {
         body = await request.json();
       } catch {
@@ -145,7 +146,13 @@ export default {
       if (!text || text.length > MAX_ALERT_CHARS) {
         return Response.json({ error: `text is required and must be at most ${MAX_ALERT_CHARS} characters` }, { status: 400 });
       }
-      return stub.fetch('https://bridge/call', { method: 'POST', body: JSON.stringify({ text, listen: body.listen === true }) });
+      if (body.thread !== undefined && (typeof body.thread !== 'string' || !THREAD_ID.test(body.thread))) {
+        return Response.json({ error: 'thread must be a Capy thread id like jam_...' }, { status: 400 });
+      }
+      return stub.fetch('https://bridge/call', {
+        method: 'POST',
+        body: JSON.stringify({ text, listen: body.listen === true, ...(body.thread ? { thread: body.thread } : {}) }),
+      });
     }
 
     return new Response('capy-phone-bridge', { status: 404 });
