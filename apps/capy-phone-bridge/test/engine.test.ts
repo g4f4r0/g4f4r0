@@ -341,7 +341,7 @@ describe('inbound: conversation', () => {
     expect(s.log.filter(l => l.startsWith('music'))).toEqual([]);
   });
 
-  it('falls back to music after a long quiet stretch without the hold tag', async () => {
+  it('says it is slow before falling back to music after a long quiet stretch without the hold tag', async () => {
     await s.say('long question');
     await s.tick(7000);
     expect(s.cfg.language.strings.fillers).toContain(s.spoken().at(-1));
@@ -349,6 +349,10 @@ describe('inbound: conversation', () => {
     await s.tick(5000);
     expect(s.log.filter(l => l.startsWith('music'))).toEqual([]);
     await s.tick(1200);
+    expect(s.spoken().at(-1)).toBe('Sorry, this is taking a bit. Hold on.');
+    expect(s.log.filter(l => l.startsWith('music'))).toEqual([]);
+    await s.spoke();
+    await s.tick(2500);
     expect(s.log.at(-1)).toBe('music c1 https://capy-phone-bridge.hellogafaro.workers.dev/hold.mp3');
   });
 

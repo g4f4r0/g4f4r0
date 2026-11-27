@@ -21,7 +21,7 @@ export const STRINGS = {
   timeLimit: 'This call has reached its time limit. Goodbye.',
   replyTimeout: 'Axo has not answered yet. The answer will be in the thread. Goodbye.',
   failure: 'Something went wrong on my side. Please try again later. Goodbye.',
-  replyListen: 'You can reply now.',
+  slow: 'Sorry, this is taking a bit. Hold on.',
   truncated: 'The rest is in the thread.',
   link: 'a link',
 };
